@@ -1,0 +1,107 @@
+'use client';
+
+import { useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
+import { Leaderboard } from '@/components/ui/Leaderboard';
+
+interface LandingScreenProps {
+  onStart: () => void;
+  isLoading?: boolean;
+  error?: string | null;
+}
+
+export function LandingScreen({ onStart, isLoading, error }: LandingScreenProps) {
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center px-4 relative overflow-hidden">
+      {/* Background decoration */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background:
+            'radial-gradient(ellipse 80% 60% at 50% 20%, rgba(0,212,255,0.06) 0%, transparent 70%)',
+        }}
+      />
+
+      {/* UCL stars pattern */}
+      <div className="absolute top-8 left-1/2 -translate-x-1/2 opacity-10">
+        <svg width="120" height="120" viewBox="0 0 120 120">
+          {/* UCL starball simplified */}
+          <circle cx="60" cy="60" r="55" stroke="#00d4ff" strokeWidth="2" fill="none" />
+          <circle cx="60" cy="60" r="35" stroke="#00d4ff" strokeWidth="1.5" fill="none" />
+          {Array.from({ length: 8 }, (_, i) => {
+            const angle = (i * Math.PI * 2) / 8 - Math.PI / 2;
+            const x = 60 + 45 * Math.cos(angle);
+            const y = 60 + 45 * Math.sin(angle);
+            return <circle key={i} cx={x} cy={y} r="4" fill="#ffd700" />;
+          })}
+        </svg>
+      </div>
+
+      <div className="relative z-10 flex flex-col items-center gap-6 text-center max-w-lg">
+        {/* Title */}
+        <div>
+          <h1 className="font-display font-bold text-6xl md:text-8xl text-white tracking-tight leading-none">
+            UCL
+          </h1>
+          <h1 className="font-display font-bold text-6xl md:text-8xl text-accent tracking-tight leading-none">
+            DRAFT
+          </h1>
+        </div>
+
+        {/* Tagline */}
+        <p className="font-body text-white/50 text-base md:text-lg">
+          Build your ultimate squad. Conquer Europe.
+        </p>
+
+        {/* Score reminder */}
+        <div className="flex gap-3 text-xs font-display text-white/30 uppercase tracking-widest">
+          <span>OVR + Chemistry</span>
+          <span className="text-accent">=</span>
+          <span>Draft Score</span>
+          <span className="text-accent/50">max 200</span>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="bg-ucl-red/10 border border-ucl-red/30 rounded-lg px-4 py-3 text-ucl-red text-sm font-body">
+            {error.includes('players.json')
+              ? 'Player data not found. Run `npm run generate` after adding data/players.csv.'
+              : error}
+          </div>
+        )}
+
+        {/* CTAs */}
+        <div className="flex gap-3 mt-2">
+          <Button variant="primary" size="lg" onClick={onStart} disabled={isLoading}>
+            {isLoading ? 'Loading...' : '⚡ Start Draft'}
+          </Button>
+          <Button variant="ghost" size="lg" onClick={() => setShowLeaderboard(true)}>
+            🏆 Leaderboard
+          </Button>
+        </div>
+      </div>
+
+      {/* Leaderboard modal */}
+      <Modal
+        isOpen={showLeaderboard}
+        onClose={() => setShowLeaderboard(false)}
+        size="md"
+      >
+        <div className="p-6">
+          <h2 className="font-display font-bold text-xl text-white mb-4">
+            🏆 Draft Leaderboard
+          </h2>
+          <Leaderboard />
+          <div className="mt-4 flex justify-end">
+            <Button variant="ghost" size="sm" onClick={() => setShowLeaderboard(false)}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}

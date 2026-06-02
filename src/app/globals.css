@@ -1,27 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a0e1a;
+  --primary: #1a2744;
+  --accent: #00d4ff;
+  --gold: #ffd700;
+  --green: #00ff88;
+  --red: #ff4444;
+  --white: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.6);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
 }
 
+html,
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--background);
+  color: var(--white);
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 3px;
+}
+
+.glow-accent {
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.4), 0 0 24px rgba(0, 212, 255, 0.15);
+}
+
+.glow-gold {
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.4), 0 0 24px rgba(255, 215, 0, 0.15);
+}
+
+.card-tier-gold {
+  background: linear-gradient(145deg, #3d2c00 0%, #1a1000 60%, #2a1d00 100%);
+  border-color: #ffd700;
+}
+.card-tier-silver {
+  background: linear-gradient(145deg, #2a2a35 0%, #131318 60%, #1e1e28 100%);
+  border-color: #c0c0d0;
+}
+.card-tier-bronze {
+  background: linear-gradient(145deg, #2a1a10 0%, #130d08 60%, #1e1108 100%);
+  border-color: #cd7f32;
+}
+.card-tier-common {
+  background: linear-gradient(145deg, #1a2030 0%, #0d1018 60%, #141820 100%);
+  border-color: #3a4a5a;
+}
+
+.chem-bar-fill {
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.bracket-line {
+  border-color: rgba(0, 212, 255, 0.3);
 }

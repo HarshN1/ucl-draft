@@ -1,101 +1,136 @@
-import Image from "next/image";
+'use client';
+
+import { GameState } from '@/types';
+import { useDraft } from '@/hooks/useDraft';
+import { useSound } from '@/hooks/useSound';
+import { findUserMatch } from '@/engine/bracketEngine';
+
+import { LandingScreen } from '@/screens/LandingScreen';
+import { FormationScreen } from '@/screens/FormationScreen';
+import { DraftScreen } from '@/screens/DraftScreen';
+import { SubDraftScreen } from '@/screens/SubDraftScreen';
+import { DraftScoreScreen } from '@/screens/DraftScoreScreen';
+import { BracketScreen } from '@/screens/BracketScreen';
+import { MatchScreen } from '@/screens/MatchScreen';
+import { TrophyScreen } from '@/screens/TrophyScreen';
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const draft = useDraft();
+  const { initAudio, playGoal } = useSound();
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
-  );
+  function handleStart() {
+    initAudio();
+    draft.startGame();
+  }
+
+  // Derive current opponent from the bracket
+  const userMatchInfo =
+    draft.bracket &&
+    (draft.gameState === GameState.MATCH_SIM || draft.gameState === GameState.POST_MATCH)
+      ? findUserMatch(draft.bracket, draft.currentRound)
+      : null;
+
+  const opponent = userMatchInfo?.match
+    ? userMatchInfo.match.teamA.isUser
+      ? userMatchInfo.match.teamB
+      : userMatchInfo.match.teamA
+    : null;
+
+  const roundName = draft.bracket?.[draft.currentRound]?.name ?? '';
+  const isFinalRound = draft.currentRound === 3;
+
+  switch (draft.gameState) {
+    case GameState.LANDING:
+      return (
+        <LandingScreen
+          onStart={handleStart}
+          isLoading={draft.isLoadingPool}
+          error={draft.poolError}
+        />
+      );
+
+    case GameState.FORMATION_PICK:
+      return (
+        <FormationScreen
+          formations={draft.formationOptions}
+          onSelect={draft.selectFormation}
+        />
+      );
+
+    case GameState.DRAFT:
+      if (!draft.formation) return null;
+      return (
+        <DraftScreen
+          key={draft.currentPickIndex}
+          formation={draft.formation}
+          currentPickIndex={draft.currentPickIndex}
+          pendingSlotIndices={draft.pendingSlotIndices ?? []}
+          currentCards={draft.currentCards}
+          draftedStarters={draft.draftedStarters}
+          currentChemistry={draft.chemPreview}
+          onPick={draft.pickStarter}
+        />
+      );
+
+    case GameState.SUB_DRAFT:
+      return (
+        <SubDraftScreen
+          key={draft.currentPickIndex}
+          currentPickIndex={draft.currentPickIndex}
+          currentCards={draft.currentCards}
+          onPick={draft.pickSub}
+        />
+      );
+
+    case GameState.DRAFT_SCORE:
+      if (!draft.squad) return null;
+      return (
+        <DraftScoreScreen
+          squad={draft.squad}
+          onContinue={draft.confirmDraftScore}
+        />
+      );
+
+    case GameState.BRACKET_VIEW:
+      if (!draft.bracket) return null;
+      return (
+        <BracketScreen
+          rounds={draft.bracket}
+          currentRound={draft.currentRound}
+          currentMatchIndex={draft.currentMatchIndex}
+          onPlayMatch={draft.startMatch}
+          teamName={draft.teamName}
+        />
+      );
+
+    case GameState.MATCH_SIM:
+    case GameState.POST_MATCH:
+      if (!draft.squad || !draft.bracket || !opponent) return null;
+      return (
+        <MatchScreen
+          squad={draft.squad}
+          opponent={opponent}
+          roundIndex={draft.currentRound}
+          roundName={roundName}
+          isFinalRound={isFinalRound}
+          onMatchComplete={draft.setMatchResult}
+          onContinue={draft.confirmPostMatch}
+          playGoalSound={playGoal}
+        />
+      );
+
+    case GameState.TROPHY_SCREEN:
+      if (!draft.squad) return null;
+      return (
+        <TrophyScreen
+          squad={draft.squad}
+          isChampion={draft.isChampion}
+          roundReached={draft.currentRound}
+          onPlayAgain={draft.reset}
+        />
+      );
+
+    default:
+      return null;
+  }
 }
