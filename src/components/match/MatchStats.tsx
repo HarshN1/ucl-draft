@@ -50,6 +50,12 @@ export function MatchStats({ result, userTeamName, opponentName }: MatchStatsPro
       <StatRow label="Possession %" userVal={result.possession} oppVal={100 - result.possession} />
       <StatRow label="Shots" userVal={result.userShots} oppVal={result.opponentShots} />
       <StatRow label="On Target" userVal={result.userShotsOnTarget} oppVal={result.opponentShotsOnTarget} />
+      {result.userBigChances !== undefined && (
+        <StatRow label="Big Chances" userVal={result.userBigChances} oppVal={result.opponentBigChances ?? 0} />
+      )}
+      {result.userCorners !== undefined && (
+        <StatRow label="Corners" userVal={result.userCorners} oppVal={result.opponentCorners ?? 0} />
+      )}
 
       <div className="flex justify-between font-body text-xs">
         <span className="text-white/50">{result.userXg} xG</span>

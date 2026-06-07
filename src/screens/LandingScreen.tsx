@@ -15,7 +15,7 @@ export function LandingScreen({ onStart, isLoading, error }: LandingScreenProps)
   const [showLeaderboard, setShowLeaderboard] = useState(false);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-4 relative overflow-hidden">
+    <div className="h-full flex flex-col items-center justify-center px-4 relative overflow-hidden">
       {/* Background decoration */}
       <div
         className="absolute inset-0 pointer-events-none"
@@ -42,18 +42,18 @@ export function LandingScreen({ onStart, isLoading, error }: LandingScreenProps)
 
       <div className="relative z-10 flex flex-col items-center gap-6 text-center max-w-lg">
         {/* Title */}
-        <div>
-          <h1 className="font-display font-bold text-6xl md:text-8xl text-white tracking-tight leading-none">
-            UCL
-          </h1>
-          <h1 className="font-display font-bold text-6xl md:text-8xl text-accent tracking-tight leading-none">
+        <div className="flex flex-col items-center">
+          <span className="font-display font-bold text-2xl md:text-3xl text-white/70 tracking-[0.35em] uppercase">
+            FUT
+          </span>
+          <h1 className="font-display font-bold text-6xl md:text-8xl text-gold tracking-tight leading-none text-glow-gold">
             DRAFT
           </h1>
         </div>
 
         {/* Tagline */}
         <p className="font-body text-white/50 text-base md:text-lg">
-          Build your ultimate squad. Conquer Europe.
+          Build your squad. Chase 194.
         </p>
 
         {/* Score reminder */}

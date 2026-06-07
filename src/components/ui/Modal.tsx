@@ -55,7 +55,7 @@ export function Modal({
       {/* Panel */}
       <div
         className={clsx(
-          'relative z-10 bg-primary border border-accent/30 rounded-xl shadow-2xl',
+          'relative z-10 bg-primary border-2 border-gold/60 rounded-none shadow-2xl',
           'animate-fade-in',
           {
             'max-w-sm w-full': size === 'sm',

@@ -1,16 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import type { Squad } from '@/types';
+import type { Squad, BracketTeam } from '@/types';
 import { getDraftScoreTier } from '@/types';
 import { Button } from '@/components/ui/Button';
 import { useLeaderboard } from '@/hooks/useLeaderboard';
 import { getRoundResultLabel } from '@/engine/bracketEngine';
+import { proxied } from '@/lib/img';
 
 interface TrophyScreenProps {
   squad: Squad;
   isChampion: boolean;
   roundReached: number;
+  champion?: BracketTeam | null; // tournament winner (when user eliminated)
   onPlayAgain: () => void;
 }
 
@@ -39,24 +41,30 @@ export function TrophyScreen({
   squad,
   isChampion,
   roundReached,
+  champion,
   onPlayAgain,
 }: TrophyScreenProps) {
   const [saved, setSaved] = useState(false);
-  const [teamNameInput, setTeamNameInput] = useState(squad.teamName);
-  const { saveEntry } = useLeaderboard();
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const { saveEntry, saving } = useLeaderboard();
 
   const tier = getDraftScoreTier(squad.draftScore);
   const resultLabel = isChampion
     ? 'Champions'
     : getRoundResultLabel(roundReached, false);
 
-  function handleSave() {
-    saveEntry(teamNameInput || squad.teamName, squad.formation.name, squad.draftScore, resultLabel);
-    setSaved(true);
+  async function handleSave() {
+    setSaveError(null);
+    try {
+      await saveEntry(squad.teamName, squad.formation.name, squad.draftScore, resultLabel);
+      setSaved(true);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save');
+    }
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12 relative overflow-hidden">
+    <div className="h-full overflow-y-auto flex flex-col items-center justify-center px-4 py-10 relative">
       {isChampion && <Confetti />}
 
       <div
@@ -71,6 +79,17 @@ export function TrophyScreen({
       <div className="relative z-10 flex flex-col items-center gap-6 text-center max-w-md w-full">
         {/* Trophy or elimination */}
         <div className="text-8xl">{isChampion ? '🏆' : '❌'}</div>
+
+        {/* User club identity */}
+        <div className="flex items-center gap-2.5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={proxied('https://cdn.sofifa.net/teams/918/60.png')}
+            alt={squad.teamName}
+            className="h-7 w-7 object-contain"
+          />
+          <span className="font-display font-bold uppercase tracking-wide text-white text-lg">{squad.teamName}</span>
+        </div>
 
         <div>
           {isChampion ? (
@@ -92,8 +111,31 @@ export function TrophyScreen({
           )}
         </div>
 
+        {/* Tournament champion (shown when the user was eliminated) */}
+        {!isChampion && champion && (
+          <div className="flex items-center gap-3 bg-gold/10 border-2 border-gold/40 px-5 py-3">
+            <span className="text-2xl">🏆</span>
+            {champion.badgeUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={proxied(champion.badgeUrl)}
+                alt={champion.name}
+                className="h-8 w-8 object-contain"
+              />
+            )}
+            <div className="text-left">
+              <div className="font-display text-[10px] tracking-widest text-gold/70 uppercase">
+                Tournament Winner
+              </div>
+              <div className="font-display font-bold text-white text-lg leading-tight">
+                {champion.name}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Draft Score summary */}
-        <div className="bg-primary border border-white/10 rounded-xl px-6 py-4 w-full">
+        <div className="bg-primary border-2 border-white/10 px-6 py-4 w-full">
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
               <div className="font-display font-bold text-2xl text-white">
@@ -132,21 +174,23 @@ export function TrophyScreen({
         </div>
 
         {/* Save to leaderboard */}
-        {!saved ? (
-          <div className="w-full flex flex-col gap-3">
-            <input
-              type="text"
-              value={teamNameInput}
-              onChange={(e) => setTeamNameInput(e.target.value.slice(0, 24))}
-              placeholder="Team name"
-              className="w-full bg-primary border border-white/20 rounded-lg px-4 py-2.5 font-body text-white placeholder-white/30 focus:outline-none focus:border-accent text-sm"
-            />
-            <Button variant="gold" size="md" onClick={handleSave} className="w-full">
-              Save to Leaderboard
-            </Button>
+        {saveError && (
+          <div className="w-full px-3 py-2 bg-ucl-red/10 border border-ucl-red/30 text-ucl-red text-xs font-body text-center">
+            {saveError}
           </div>
+        )}
+        {!saved ? (
+          <Button
+            variant="gold"
+            size="md"
+            onClick={handleSave}
+            disabled={saving}
+            className="w-full"
+          >
+            {saving ? 'Saving…' : 'Save to Leaderboard'}
+          </Button>
         ) : (
-          <div className="font-body text-ucl-green text-sm">✓ Saved to leaderboard!</div>
+          <div className="font-display uppercase tracking-widest text-ucl-green text-sm">✓ Saved to leaderboard</div>
         )}
 
         <Button variant="ghost" size="md" onClick={onPlayAgain} className="w-full">

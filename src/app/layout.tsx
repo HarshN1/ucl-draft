@@ -2,9 +2,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'UCL Draft — Build Your Squad',
+  title: 'FUT Draft — Chase 194',
   description:
-    'Draft your ultimate Champions League squad and compete in the UCL knockout bracket.',
+    'Free FIFA 16-style FUT Draft with today\'s players. Build your squad, chase 194, conquer the UCL bracket.',
 };
 
 export default function RootLayout({

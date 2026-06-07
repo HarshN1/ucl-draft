@@ -53,7 +53,7 @@ export function MatchScreen({
   const oppScore = result ? result.opponentScore : 0;
 
   return (
-    <div className="min-h-screen flex flex-col px-4 py-8">
+    <div className="h-full overflow-y-auto flex flex-col px-4 py-8">
       {/* Score ticker */}
       <div className="flex items-center justify-center mb-8">
         <div className="bg-primary border border-white/10 rounded-xl px-8 py-4 text-center min-w-[280px]">
@@ -90,8 +90,10 @@ export function MatchScreen({
             </div>
           </div>
           {result?.wentToET && (
-            <div className="font-display text-xs text-gold mt-1">
-              {result.wentToPenalties ? '(Penalties)' : '(After Extra Time)'}
+            <div className="font-display text-xs text-gold mt-1 uppercase tracking-widest">
+              {result.wentToPenalties
+                ? `${result.userPenScore}–${result.oppPenScore} on penalties`
+                : 'After Extra Time'}
             </div>
           )}
         </div>

@@ -11,16 +11,27 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: '#0a0e1a',
-        primary: '#1a2744',
-        accent: '#00d4ff',
-        gold: '#ffd700',
-        'ucl-green': '#00ff88',
-        'ucl-red': '#ff4444',
+        background: '#07131c',
+        primary: '#0e2735',
+        accent: '#2fd0e6',
+        gold: '#e2ae16',
+        lime: '#79b928',
+        'ucl-green': '#2fd07a',
+        'ucl-red': '#e0473b',
+        chem: {
+          green: '#79b928',
+          yellow: '#e2ae16',
+          red: '#e0473b',
+          unlit: '#1e3a4a',
+        },
+        fut: {
+          teal: '#1a4d5c',
+          panel: '#0e2735cc',
+        },
       },
       fontFamily: {
-        display: ['Rajdhani', 'sans-serif'],
-        body: ['Inter', 'sans-serif'],
+        display: ['Oswald', 'sans-serif'],
+        body: ['Barlow Condensed', 'sans-serif'],
       },
       keyframes: {
         'card-flip': {

@@ -8,7 +8,7 @@ import { findUserMatch } from '@/engine/bracketEngine';
 import { LandingScreen } from '@/screens/LandingScreen';
 import { FormationScreen } from '@/screens/FormationScreen';
 import { DraftScreen } from '@/screens/DraftScreen';
-import { SubDraftScreen } from '@/screens/SubDraftScreen';
+import { ManagerScreen } from '@/screens/ManagerScreen';
 import { DraftScoreScreen } from '@/screens/DraftScoreScreen';
 import { BracketScreen } from '@/screens/BracketScreen';
 import { MatchScreen } from '@/screens/MatchScreen';
@@ -39,7 +39,27 @@ export default function Home() {
   const roundName = draft.bracket?.[draft.currentRound]?.name ?? '';
   const isFinalRound = draft.currentRound === 3;
 
-  switch (draft.gameState) {
+  const screen = renderScreen();
+
+  // Fixed 16:9 "console stage" — isolates the game from browser window size so
+  // it always frames like a video game rather than a responsive web page.
+  return (
+    <div className="stadium-mesh fixed inset-0 overflow-hidden select-none flex items-center justify-center">
+      <div
+        className="relative overflow-hidden"
+        style={{
+          width: 'min(100vw, 177.78vh)',
+          height: 'min(56.25vw, 100vh)',
+          containerType: 'size',
+        }}
+      >
+        {screen}
+      </div>
+    </div>
+  );
+
+  function renderScreen() {
+    switch (draft.gameState) {
     case GameState.LANDING:
       return (
         <LandingScreen
@@ -57,28 +77,39 @@ export default function Home() {
         />
       );
 
-    case GameState.DRAFT:
+    case GameState.DRAFT: {
       if (!draft.formation) return null;
+      const filledCount =
+        draft.starterPlayers.filter(Boolean).length +
+        draft.benchPlayers.filter(Boolean).length;
       return (
         <DraftScreen
-          key={draft.currentPickIndex}
           formation={draft.formation}
-          currentPickIndex={draft.currentPickIndex}
-          pendingSlotIndices={draft.pendingSlotIndices ?? []}
+          awaitingCaptain={draft.awaitingCaptain}
+          starterPlayers={draft.starterPlayers}
+          benchPlayers={draft.benchPlayers}
+          benchGroups={draft.benchGroups}
+          subsCount={draft.subsCount}
+          activeSlot={draft.activeSlot}
           currentCards={draft.currentCards}
-          draftedStarters={draft.draftedStarters}
-          currentChemistry={draft.chemPreview}
-          onPick={draft.pickStarter}
+          chemPreview={draft.chemPreview}
+          squadRating={draft.squadRating}
+          filledCount={filledCount}
+          getChemPreviewForCandidate={draft.getChemPreviewForCandidate}
+          onPickCaptain={draft.pickCaptain}
+          onSelectSlot={draft.selectSlot}
+          onPickPlayer={draft.pickPlayer}
+          onSwapSlots={draft.swapSlots}
         />
       );
+    }
 
-    case GameState.SUB_DRAFT:
+    case GameState.MANAGER_PICK:
       return (
-        <SubDraftScreen
-          key={draft.currentPickIndex}
-          currentPickIndex={draft.currentPickIndex}
-          currentCards={draft.currentCards}
-          onPick={draft.pickSub}
+        <ManagerScreen
+          managers={draft.managerOptions}
+          starters={draft.starterPlayers.filter((p): p is NonNullable<typeof p> => !!p)}
+          onPick={draft.pickManager}
         />
       );
 
@@ -126,11 +157,13 @@ export default function Home() {
           squad={draft.squad}
           isChampion={draft.isChampion}
           roundReached={draft.currentRound}
+          champion={draft.tournamentChampion}
           onPlayAgain={draft.reset}
         />
       );
 
     default:
       return null;
+    }
   }
 }

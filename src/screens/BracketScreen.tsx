@@ -31,7 +31,7 @@ export function BracketScreen({
   const roundName = rounds[currentRound]?.name ?? '';
 
   return (
-    <div className="min-h-screen flex flex-col px-4 py-8">
+    <div className="h-full overflow-y-auto flex flex-col px-4 py-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-8 max-w-7xl mx-auto w-full">
         <div>

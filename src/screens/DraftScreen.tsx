@@ -1,134 +1,148 @@
 'use client';
 
-import type { Player, DraftedPlayer, Formation, ChemistryPreview } from '@/types';
-import { DraftPicker } from '@/components/draft/DraftPicker';
-import { ChemistryBar } from '@/components/draft/ChemistryBar';
-import { PlayerCard } from '@/components/draft/PlayerCard';
+import { useState } from 'react';
+import type { Player, Formation, ChemistryPreview } from '@/types';
+import type { ActiveSlot } from '@/hooks/useDraft';
+import { SquadBoard } from '@/components/draft/SquadBoard';
+import { CardChooser } from '@/components/draft/CardChooser';
 
 interface DraftScreenProps {
   formation: Formation;
-  currentPickIndex: number;
-  pendingSlotIndices: number[];
+  awaitingCaptain: boolean;
+  starterPlayers: (Player | null)[];
+  benchPlayers: (Player | null)[];
+  benchGroups: string[];
+  subsCount: number;
+  activeSlot: ActiveSlot | null;
   currentCards: Player[];
-  draftedStarters: DraftedPlayer[];
-  currentChemistry: ChemistryPreview;
-  onPick: (player: Player) => void;
+  chemPreview: ChemistryPreview;
+  squadRating: number;
+  filledCount: number;
+  getChemPreviewForCandidate: (p: Player) => number;
+  onPickCaptain: (p: Player) => void;
+  onSelectSlot: (s: ActiveSlot) => void;
+  onPickPlayer: (p: Player) => void;
+  onSwapSlots: (a: ActiveSlot, b: ActiveSlot) => void;
 }
 
-export function DraftScreen({
-  formation,
-  currentPickIndex,
-  pendingSlotIndices,
-  currentCards,
-  draftedStarters,
-  currentChemistry,
-  onPick,
-}: DraftScreenProps) {
-  const totalSlots = formation.positions.length;
-  const isCaptainPick = currentPickIndex === 0;
-  // For captain pick, show "CAP" label; otherwise show the next pending slot
-  const currentSlotIndex = isCaptainPick ? null : pendingSlotIndices[0] ?? null;
-  const currentSlot = currentSlotIndex !== null
-    ? formation.positions[currentSlotIndex]
-    : null;
+function Counter({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className="stat-pod text-center">
+      <div className="font-display font-bold text-4xl leading-none" style={{ color }}>
+        {value}
+      </div>
+      <div className="font-display text-[10px] tracking-widest text-white/40 uppercase mt-1">{label}</div>
+    </div>
+  );
+}
+
+export function DraftScreen(props: DraftScreenProps) {
+  const {
+    formation, awaitingCaptain, starterPlayers, benchPlayers, benchGroups, subsCount,
+    activeSlot, currentCards, chemPreview, squadRating, filledCount,
+    getChemPreviewForCandidate, onPickCaptain, onSelectSlot,
+    onPickPlayer, onSwapSlots,
+  } = props;
+
+  const [draggingSlot, setDraggingSlot] = useState<ActiveSlot | null>(null);
+  const picking = awaitingCaptain || !!activeSlot;
+
+  const chemColor =
+    chemPreview.total > 75 ? '#16d36a' : chemPreview.total >= 50 ? '#e0a000' : '#d63a3a';
+
+  function handleDrop(target: ActiveSlot) {
+    if (draggingSlot && !(draggingSlot.zone === target.zone && draggingSlot.index === target.index)) {
+      onSwapSlots(draggingSlot, target);
+    }
+    setDraggingSlot(null);
+  }
+
+  const activeLabel =
+    activeSlot?.zone === 'starter'
+      ? formation.positions[activeSlot.index]?.slot
+      : activeSlot
+      ? benchGroups[activeSlot.index]
+      : '';
+  const activeGroup =
+    activeSlot?.zone === 'starter'
+      ? formation.positions[activeSlot.index]?.positionGroup
+      : activeSlot
+      ? benchGroups[activeSlot.index]
+      : undefined;
 
   return (
-    <div className="min-h-screen flex flex-col px-4 py-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6 max-w-6xl mx-auto w-full">
-        <div>
-          <div className="font-display text-white/30 text-xs uppercase tracking-widest">
-            {formation.name} · {isCaptainPick ? 'Captain Pick' : `Pick ${currentPickIndex + 1}/${totalSlots}`}
+    <div className="h-full flex flex-col px-4 py-3 overflow-hidden" onDragEnd={() => setDraggingSlot(null)}>
+      {/* Counters */}
+      <div className="flex items-center justify-between max-w-4xl mx-auto w-full mb-2 shrink-0">
+        <Counter label="Rating" value={squadRating} color="#ffffff" />
+        <div className="text-center">
+          <div className="font-display text-white/30 text-[10px] uppercase tracking-widest">
+            {formation.name}
           </div>
-          <h2 className="font-display font-bold text-2xl text-white">
-            {isCaptainPick ? '⚡ Choose Your Captain' : 'Select a Player'}
-          </h2>
+          <div className="font-display font-bold text-2xl text-accent">{filledCount}/23 DRAFTED</div>
         </div>
-
-        {/* Progress bar */}
-        <div className="w-40">
-          <div className="flex justify-between text-xs text-white/30 font-display mb-1">
-            <span>{currentPickIndex}</span>
-            <span>{totalSlots} players</span>
-          </div>
-          <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-accent rounded-full transition-all duration-500"
-              style={{ width: `${(currentPickIndex / totalSlots) * 100}%` }}
-            />
-          </div>
-        </div>
+        <Counter label="Chemistry" value={chemPreview.total} color={chemColor} />
       </div>
 
-      <div className="flex gap-8 max-w-6xl mx-auto w-full flex-wrap justify-center">
-        {/* Left: already drafted */}
-        <div className="flex flex-col gap-2 w-36">
-          <div className="font-display text-xs text-white/30 uppercase tracking-widest mb-1">
-            Drafted
-          </div>
-          {draftedStarters.map((dp) => (
-            <div key={dp.slotIndex} className="flex items-center gap-2">
-              <span className="text-white/30 font-display text-xs w-8">{dp.slot}</span>
-              <span className="text-white text-xs font-body truncate flex-1">
-                {dp.player.name}
-              </span>
-              <span className="text-white/40 font-display text-xs">{dp.player.overall}</span>
-            </div>
-          ))}
-          {/* Remaining slots */}
-          {(pendingSlotIndices ?? []).map((si) => (
-            <div key={`empty-${si}`} className="flex items-center gap-2 opacity-30">
-              <span className="font-display text-xs w-8 text-white/20">
-                {formation.positions[si]?.slot ?? '?'}
-              </span>
-              <div className="h-3 w-16 bg-white/10 rounded" />
-            </div>
-          ))}
-          {isCaptainPick && (
-            <div className="flex items-center gap-2 opacity-50">
-              <span className="font-display text-xs w-8 text-accent">CAP</span>
-              <div className="h-3 w-16 bg-accent/20 rounded" />
-            </div>
-          )}
-
-          {/* Chemistry so far */}
-          <div className="mt-4">
-            <ChemistryBar value={currentChemistry.total} label="Live Chem" />
-          </div>
-        </div>
-
-        {/* Center: card picker */}
-        <div className="flex-1 flex items-center justify-center min-w-[400px]">
-          <DraftPicker
-            cards={currentCards}
-            slotLabel={isCaptainPick ? 'CAPTAIN' : (currentSlot?.slot ?? '?')}
-            slotIndex={currentSlotIndex ?? 0}
-            formation={formation}
-            draftedStarters={draftedStarters}
-            currentChemistry={currentChemistry}
-            isCaptainPick={isCaptainPick}
-            onPick={onPick}
-          />
-        </div>
-
-        {/* Right: mini squad view (drafted cards) */}
-        <div className="w-36 flex flex-col gap-1">
-          <div className="font-display text-xs text-white/30 uppercase tracking-widest mb-1">
-            Squad
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {draftedStarters.map((dp) => (
-              <PlayerCard
-                key={dp.slotIndex}
-                player={dp.player}
-                size="sm"
-                chemScore={dp.chemistry}
-                showChemDot
-              />
-            ))}
-          </div>
-        </div>
+      {/* Board */}
+      <div className="max-w-xl mx-auto w-full flex-1 min-h-0 flex flex-col justify-center overflow-visible">
+        <SquadBoard
+          formation={formation}
+          starterPlayers={starterPlayers}
+          benchPlayers={benchPlayers}
+          benchGroups={benchGroups}
+          subsCount={subsCount}
+          chem={chemPreview}
+          activeSlot={activeSlot}
+          draggingSlot={draggingSlot}
+          onSlotClick={(s) => {
+            const occupied = s.zone === 'starter' ? starterPlayers[s.index] : benchPlayers[s.index];
+            if (!occupied && !awaitingCaptain) onSelectSlot(s);
+          }}
+          onDragStart={(s) => setDraggingSlot(s)}
+          onDrop={handleDrop}
+        />
       </div>
+
+      {/* Hint banner when idle */}
+      {!picking && (
+        <div className="text-center mt-4 font-body text-white/45 text-sm">
+          Tap an <span className="text-accent">empty position</span> to draft it — pick the order
+          yourself. Drag drafted players to rearrange.
+        </div>
+      )}
+
+      {/* Draft picker modal overlay (contained within the console stage) */}
+      {picking && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center">
+          <div className="absolute inset-0 draft-overlay" />
+          <div className="relative z-10 w-full" style={{ perspective: '1200px' }}>
+            {/* Bar across the screen */}
+            <div className="w-full border-y-2 border-gold/50 bg-primary/80 py-4 text-center">
+              <div className="font-display text-white/40 text-[10px] uppercase tracking-[0.35em]">
+                {awaitingCaptain ? 'Choose your captain' : `Draft your ${activeLabel}`}
+              </div>
+              <div className="font-display font-bold uppercase text-3xl text-gold mt-1 text-glow-gold">
+                {awaitingCaptain ? '⚡ Pick Your Captain' : `Pick ${activeLabel}`}
+              </div>
+            </div>
+
+            <div className="mt-8 flex justify-center px-1">
+              {awaitingCaptain ? (
+                <CardChooser cards={currentCards} onPick={onPickCaptain} />
+              ) : (
+                <CardChooser
+                  cards={currentCards}
+                  onPick={onPickPlayer}
+                  chemForCandidate={getChemPreviewForCandidate}
+                  baseChem={chemPreview.total}
+                  slotGroup={activeGroup}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

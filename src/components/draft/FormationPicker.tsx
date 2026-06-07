@@ -3,39 +3,51 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
 import type { Formation, FormationPosition } from '@/types';
+import { Button } from '@/components/ui/Button';
 
 interface FormationPickerProps {
   formations: Formation[];
   onSelect: (formation: Formation) => void;
 }
 
-function MiniField({ positions }: { positions: FormationPosition[] }) {
+function dotColor(group: string) {
+  if (group === 'GK') return '#ffd700';
+  if (group === 'CB' || group === 'FB') return '#00d4ff';
+  if (group === 'ST' || group === 'WG') return '#ff5d6c';
+  return '#ffffff';
+}
+
+function PitchDiagram({ positions, big = false }: { positions: FormationPosition[]; big?: boolean }) {
   return (
-    <svg viewBox="0 0 100 130" className="w-full h-full" fill="none">
-      {/* Pitch */}
-      <rect x="0" y="0" width="100" height="130" fill="#1a3a1a" rx="2" />
-      {/* Centre circle */}
-      <circle cx="50" cy="65" r="12" stroke="#ffffff20" strokeWidth="0.8" fill="none" />
-      <line x1="0" y1="65" x2="100" y2="65" stroke="#ffffff20" strokeWidth="0.8" />
-      {/* Penalty areas */}
-      <rect x="25" y="100" width="50" height="28" stroke="#ffffff20" strokeWidth="0.8" fill="none" />
-      <rect x="25" y="2" width="50" height="28" stroke="#ffffff20" strokeWidth="0.8" fill="none" />
-      {/* Player dots */}
+    <svg viewBox="0 0 100 132" className="w-full h-full">
+      <defs>
+        <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#16432a" />
+          <stop offset="50%" stopColor="#0f3120" />
+          <stop offset="100%" stopColor="#16432a" />
+        </linearGradient>
+      </defs>
+      <rect x="0" y="0" width="100" height="132" fill="url(#pg)" rx="3" />
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <rect key={i} x="0" y={i * 22} width="100" height="11" fill="#ffffff05" />
+      ))}
+      <rect x="3" y="3" width="94" height="126" fill="none" stroke="#ffffff25" strokeWidth="0.6" />
+      <line x1="3" y1="66" x2="97" y2="66" stroke="#ffffff25" strokeWidth="0.6" />
+      <circle cx="50" cy="66" r="11" stroke="#ffffff25" strokeWidth="0.6" fill="none" />
+      <rect x="28" y="3" width="44" height="18" stroke="#ffffff20" strokeWidth="0.6" fill="none" />
+      <rect x="28" y="111" width="44" height="18" stroke="#ffffff20" strokeWidth="0.6" fill="none" />
       {positions.map((pos) => {
-        // Map coords: y=0 GK end (bottom of pitch visual), y=100 forward end (top)
-        // SVG y increases downward, so flip: svgY = 130 - (y/100 * 130)
-        const svgX = (pos.x / 100) * 100;
-        const svgY = 130 - (pos.y / 100) * 118 - 6;
+        const cx = pos.x;
+        const cy = 132 - (pos.y / 100) * 122 - 6;
         return (
-          <circle
-            key={pos.slot}
-            cx={svgX}
-            cy={svgY}
-            r="4.5"
-            fill="#00d4ff"
-            stroke="#0a0e1a"
-            strokeWidth="1"
-          />
+          <g key={pos.slot}>
+            <circle cx={cx} cy={cy} r={big ? 4.5 : 5} fill={dotColor(pos.positionGroup)} stroke="#0a0e1a" strokeWidth="1" />
+            {big && (
+              <text x={cx} y={cy + 10} textAnchor="middle" fontSize="4.2" fill="#ffffffcc" fontWeight="700">
+                {pos.slot}
+              </text>
+            )}
+          </g>
         );
       })}
     </svg>
@@ -43,46 +55,74 @@ function MiniField({ positions }: { positions: FormationPosition[] }) {
 }
 
 export function FormationPicker({ formations, onSelect }: FormationPickerProps) {
-  const [hovered, setHovered] = useState<string | null>(null);
+  const [focusName, setFocusName] = useState<string>(formations[0]?.name ?? '');
   const [selected, setSelected] = useState<string | null>(null);
+  const focused = formations.find((f) => f.name === focusName) ?? formations[0];
 
-  function handleSelect(f: Formation) {
+  function confirm(f: Formation) {
     setSelected(f.name);
     setTimeout(() => onSelect(f), 250);
   }
 
   return (
-    <div className="flex flex-wrap justify-center gap-4">
-      {formations.map((f) => {
-        const isHovered = hovered === f.name;
-        const isSelected = selected === f.name;
-        return (
-          <div
-            key={f.name}
-            onClick={() => handleSelect(f)}
-            onMouseEnter={() => setHovered(f.name)}
-            onMouseLeave={() => setHovered(null)}
-            className={clsx(
-              'w-32 rounded-xl border-2 p-3 cursor-pointer transition-all duration-200',
-              'bg-primary flex flex-col items-center gap-2',
-              isSelected
-                ? 'border-gold glow-gold scale-105'
-                : isHovered
-                ? 'border-accent glow-accent scale-102'
-                : 'border-white/10 hover:border-accent/50'
-            )}
-          >
-            {/* Mini pitch */}
-            <div className="w-full aspect-[10/13]">
-              <MiniField positions={f.positions} />
-            </div>
-            <div className="text-center">
-              <div className="font-display font-bold text-white text-sm">{f.name}</div>
-              <div className="font-body text-white/50 text-xs">{f.label}</div>
-            </div>
-          </div>
-        );
-      })}
+    <div className="flex gap-5 w-full max-w-4xl mx-auto items-stretch flex-wrap md:flex-nowrap justify-center">
+      {/* Left: scrollable list */}
+      <div className="w-full md:w-64 flex md:flex-col gap-2 overflow-x-auto md:overflow-y-auto md:max-h-[62cqh] shrink-0">
+        {formations.map((f) => {
+          const isFocus = focusName === f.name;
+          return (
+            <button
+              key={f.name}
+              onMouseEnter={() => setFocusName(f.name)}
+              onClick={() => (isFocus ? confirm(f) : setFocusName(f.name))}
+              className={clsx(
+                'ea-skew flex items-center gap-3 border-2 px-3 py-2 transition-[background-color,border-color] duration-75 ease-out shrink-0 text-left',
+                isFocus
+                  ? 'border-gold bg-gold/15 glow-active'
+                  : 'border-white/10 bg-primary/70 hover:border-gold/50'
+              )}
+            >
+              <div className="ea-unskew flex items-center gap-3">
+                <div className="w-9 h-12 shrink-0">
+                  <PitchDiagram positions={f.positions} />
+                </div>
+                <div>
+                  <div
+                    className={clsx(
+                      'font-display font-bold text-lg leading-tight uppercase tracking-wide',
+                      isFocus ? 'text-gold' : 'text-white'
+                    )}
+                  >
+                    {f.name}
+                  </div>
+                  <div className="font-display text-[11px] uppercase tracking-[0.2em] text-white/45">{f.label}</div>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Right: big preview */}
+      <div className="flex-1 min-w-[260px] flex flex-col items-center">
+        <div className="w-full flex items-baseline gap-2 mb-2">
+          <span className="font-display text-white/40 text-xs uppercase tracking-widest">Formation:</span>
+          <span className="font-display font-bold text-accent text-2xl">{focused?.name}</span>
+          <span className="font-display text-white/40 text-xs uppercase tracking-widest ml-auto">{focused?.label}</span>
+        </div>
+        <div className="rounded-xl overflow-hidden border border-white/10" style={{ aspectRatio: '7/9', height: 'min(52cqh, 480px)' }}>
+          {focused && <PitchDiagram positions={focused.positions} big />}
+        </div>
+        <Button
+          variant="primary"
+          size="lg"
+          className="mt-4 w-full max-w-xs"
+          disabled={!!selected}
+          onClick={() => focused && confirm(focused)}
+        >
+          Select {focused?.name} →
+        </Button>
+      </div>
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
 import type { BracketMatch } from '@/types';
+import { proxied } from '@/lib/img';
 
 interface BracketMatchCardProps {
   match: BracketMatch;
@@ -17,7 +18,7 @@ function TeamRow({
   isUser,
   compact,
 }: {
-  team: { name: string; ovr: number; isUser: boolean } | null;
+  team: { name: string; ovr: number; isUser: boolean; badgeUrl?: string } | null;
   score: number | null;
   isWinner: boolean;
   isUser: boolean;
@@ -48,10 +49,10 @@ function TeamRow({
         isWinner && 'bg-ucl-green/5'
       )}
     >
-      {!badgeError ? (
+      {team.badgeUrl && !badgeError ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={`https://cdn.sofifa.net/teams/${team.name.toLowerCase().replace(/\s+/g, '-')}/light_60.png`}
+          src={proxied(team.badgeUrl)}
           alt={team.name}
           className="h-4 w-4 object-contain flex-shrink-0"
           onError={() => setBadgeError(true)}

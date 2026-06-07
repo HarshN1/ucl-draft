@@ -39,9 +39,9 @@ export function EventFeed({ events, onAllEventsShown, onGoalEvent }: EventFeedPr
       }
 
       if (current < events.length) {
-        setTimeout(reveal, 600);
+        setTimeout(reveal, 900);
       } else {
-        if (onAllEventsShown) setTimeout(onAllEventsShown, 800);
+        if (onAllEventsShown) setTimeout(onAllEventsShown, 900);
       }
     };
 
