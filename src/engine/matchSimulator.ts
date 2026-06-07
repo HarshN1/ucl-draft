@@ -2,371 +2,340 @@ import type {
   Squad,
   BracketTeam,
   MatchEvent,
-  MatchEventType,
   MatchResult,
   PlayerRating,
   DraftedPlayer,
 } from '@/types';
 
-// ─── Poisson sampling ────────────────────────────────────────────────────────
+// ─── Small math helpers ────────────────────────────────────────────────────────
 
-function samplePoisson(lambda: number): number {
-  const L = Math.exp(-lambda);
-  let k = 0;
-  let p = 1;
-  do {
-    k++;
-    p *= Math.random();
-  } while (p > L);
-  return k - 1;
-}
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+/** Roughly-normal noise in [-1.5, 1.5] (sum of three uniforms, centred). */
+const gauss = () => Math.random() + Math.random() + Math.random() - 1.5;
+const rnd = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
-// ─── Squad stat extraction ───────────────────────────────────────────────────
+// ─── Slot → line buckets ───────────────────────────────────────────────────────
+
+const DEF_SLOTS = new Set(['GK', 'LB', 'RB', 'LCB', 'RCB', 'CB', 'LWB', 'RWB']);
+const ATT_SLOTS = new Set(['ST', 'LS', 'RS', 'CF', 'LF', 'RF', 'LW', 'RW']);
+// everything else (CDM/CM/CAM variants, LM, RM) is treated as midfield.
 
 interface SquadStats {
-  attack: number;   // 0–100
-  midfield: number; // 0–100
-  defense: number;  // 0–100
-  chemMult: number; // 0.85–1.15
+  attack: number;
+  midfield: number;
+  defense: number; // outfield defensive line
+  gk: number;
+  chemMult: number; // 0.80–1.20
+}
+
+function avgStat(players: DraftedPlayer[], fn: (p: DraftedPlayer['player']) => number, fallback: number) {
+  if (!players.length) return fallback;
+  return players.reduce((a, dp) => a + fn(dp.player), 0) / players.length;
 }
 
 function extractUserStats(squad: Squad): SquadStats {
   const starters = squad.starters;
-
   const gk = starters.find((s) => s.slot === 'GK');
-  const defenders = starters.filter((s) =>
-    ['LB', 'RB', 'LCB', 'RCB', 'CB', 'LWB', 'RWB'].includes(s.slot)
-  );
-  const midfielders = starters.filter((s) =>
-    ['CM', 'LCM', 'RCM', 'CDM', 'LCDM', 'RCDM', 'CAM', 'LAM', 'RAM'].includes(s.slot)
-  );
-  const forwards = starters.filter((s) =>
-    ['LW', 'RW', 'ST', 'LST', 'RST', 'CF'].includes(s.slot)
-  );
+  const defenders = starters.filter((s) => DEF_SLOTS.has(s.slot) && s.slot !== 'GK');
+  const forwards = starters.filter((s) => ATT_SLOTS.has(s.slot));
+  const mids = starters.filter((s) => !DEF_SLOTS.has(s.slot) && !ATT_SLOTS.has(s.slot));
 
-  const avg = (players: DraftedPlayer[], keys: (keyof DraftedPlayer['player'])[]) => {
-    if (players.length === 0) return 75;
-    const sum = players.reduce((acc, dp) => {
-      const vals = keys.map((k) => dp.player[k] as number);
-      return acc + vals.reduce((a, b) => a + b, 0) / vals.length;
-    }, 0);
-    return sum / players.length;
-  };
-
-  const attack = avg(
-    forwards.length > 0 ? forwards : starters.slice(-3),
-    ['sho', 'pac']
+  const attack = avgStat(
+    forwards.length ? forwards : mids,
+    (p) => p.sho * 0.45 + p.pac * 0.25 + p.dri * 0.3,
+    74
   );
-  const midfield = avg(
-    midfielders.length > 0 ? midfielders : starters.slice(4, 7),
-    ['pas', 'dri']
+  const midfield = avgStat(
+    mids.length ? mids : starters,
+    (p) => p.pas * 0.4 + p.dri * 0.3 + p.phy * 0.3,
+    74
   );
-  const gkStat = gk ? (gk.player.def + gk.player.phy) / 2 : 70;
-  const defAvg = avg(
-    defenders.length > 0 ? defenders : starters.slice(1, 5),
-    ['def', 'phy']
+  const defense = avgStat(
+    defenders.length ? defenders : starters,
+    (p) => p.def * 0.55 + p.phy * 0.3 + p.pac * 0.15,
+    72
   );
-  const defense = (defAvg * 2 + gkStat) / 3;
+  const gkRating = gk ? gk.player.overall : 72;
 
-  const chemMult = 0.85 + (squad.chemistry / 100) * 0.3;
+  // Chemistry swings effective performance from ×0.80 (broken) to ×1.20 (perfect).
+  const chemMult = 0.8 + (squad.chemistry / 100) * 0.4;
 
-  return { attack, midfield, defense, chemMult };
+  return { attack, midfield, defense, gk: gkRating, chemMult };
 }
 
-function deriveOpponentStats(ovr: number): SquadStats {
-  return {
-    attack: ovr - 3,
-    midfield: ovr - 5,
-    defense: ovr - 3,
-    chemMult: 1.0,
-  };
+// Brutal opponents: real UCL clubs perform at (around) their full overall.
+function opponentStats(ovr: number): SquadStats {
+  return { attack: ovr + 1, midfield: ovr - 1, defense: ovr, gk: ovr, chemMult: 1.0 };
 }
 
-// ─── xG calculation ──────────────────────────────────────────────────────────
+// ─── Shot-by-shot side simulation ──────────────────────────────────────────────
 
-function computeXg(
-  attackerStats: number,
-  chemMult: number,
-  defenderStats: number,
-  defChemMult: number,
-  bonus = 0
-): number {
-  const raw =
-    ((attackerStats * chemMult) / (defenderStats * defChemMult)) * 1.8 + bonus;
-  // Add ±0.3 variance
-  const variance = (Math.random() - 0.5) * 0.6;
-  return Math.max(0.1, raw + variance);
+interface SideResult {
+  shots: number;
+  sot: number;
+  xg: number;
+  bigChances: number;
+  corners: number;
+  goals: number;
+  goalMinutes: number[];
 }
 
-// ─── Event generation ────────────────────────────────────────────────────────
+/**
+ * Simulate one team's attacking output over a period: derive a realistic number
+ * of shots from attacking power + possession, then resolve each shot into
+ * on-target / big-chance / goal using the chance quality vs the opposing keeper.
+ */
+function simulateSide(
+  attackPower: number,
+  defResist: number,
+  possession: number,
+  homeBonus: number,
+  minuteLo: number,
+  minuteHi: number,
+  scale = 1
+): SideResult {
+  const shotBase = 3 + attackPower / 14;
+  let shots = Math.round((shotBase * (0.55 + possession / 100) * (1 + homeBonus) + gauss() * 1.6) * scale);
+  shots = clamp(shots, scale < 1 ? 0 : 1, 22);
+
+  let xg = 0;
+  let sot = 0;
+  let bigChances = 0;
+  let corners = Math.max(0, Math.round(shots * 0.5 + gauss()));
+  let goals = 0;
+  const goalMinutes: number[] = [];
+
+  for (let i = 0; i < shots; i++) {
+    // Each shot's quality IS its xG — so a shot converts with that probability.
+    const quality = clamp(0.085 + (attackPower - defResist) / 400 + (Math.random() - 0.5) * 0.13, 0.02, 0.85);
+    xg += quality;
+    if (quality > 0.3) bigChances++;
+    if (Math.random() < quality) {
+      goals++;
+      sot++; // goals are on target
+      goalMinutes.push(minuteLo + Math.floor(Math.random() * Math.max(1, minuteHi - minuteLo)));
+    } else if (Math.random() < clamp(0.33 + attackPower / 300, 0.2, 0.62)) {
+      sot++;
+    }
+  }
+  corners = clamp(corners, 0, 14);
+  goalMinutes.sort((a, b) => a - b);
+  return { shots, sot, xg, bigChances, corners, goals, goalMinutes };
+}
+
+// ─── Event narration ───────────────────────────────────────────────────────────
 
 const GOAL_TEMPLATES = [
-  (name: string) => `${name} drives inside the box and fires low into the corner. GOAL!`,
-  (name: string) => `${name} gets on the end of the cross and heads it home. GOAL!`,
-  (name: string) => `${name} curls a beautiful effort into the top corner. GOAL!`,
-  (name: string) => `${name} slots past the keeper from close range. GOAL!`,
-  (name: string) => `${name} breaks the offside trap and finishes clinically. GOAL!`,
-  (name: string) => `${name} latches onto the through ball and doesn't miss. GOAL!`,
+  (n: string) => `${n} drives into the box and fires low into the corner. GOAL!`,
+  (n: string) => `${n} rises highest and heads it home. GOAL!`,
+  (n: string) => `${n} curls a beauty into the top corner. GOAL!`,
+  (n: string) => `${n} slots past the keeper from close range. GOAL!`,
+  (n: string) => `${n} beats the offside trap and finishes clinically. GOAL!`,
+  (n: string) => `${n} smashes it in off the underside of the bar. GOAL!`,
+  (n: string) => `${n} converts the rebound after a parried shot. GOAL!`,
 ];
-
-const NON_GOAL_TEMPLATES: { type: MatchEventType; text: (name: string) => string }[] = [
-  { type: 'SAVE', text: (n) => `Brilliant save! The keeper gets down to deny ${n}.` },
-  { type: 'YELLOW_CARD', text: (n) => `${n} is booked for a late tackle. Yellow card.` },
-  { type: 'CHANCE', text: (n) => `${n} shoots wide! So close to breaking the deadlock.` },
-  { type: 'KEY_PASS', text: (n) => `Incisive pass from ${n} splits the defence — chance on!` },
-  { type: 'SUBSTITUTION', text: (n) => `Tactical change — ${n} is brought on to change the game.` },
-  { type: 'FOUL', text: (n) => `${n} brings down the attacker. Free kick awarded.` },
-  { type: 'CHANCE', text: (n) => `${n} hits the post! Agonisingly close.` },
-  { type: 'SAVE', text: (n) => `The keeper tips it over — ${n} can't believe it.` },
+const SAVE_TEMPLATES = [
+  (n: string) => `Huge save to deny ${n} from range!`,
+  (n: string) => `The keeper tips ${n}'s effort onto the post!`,
+  (n: string) => `Point-blank stop keeps ${n} out!`,
 ];
+const CHANCE_TEMPLATES = [
+  (n: string) => `${n} drags it just wide of the far post.`,
+  (n: string) => `${n} rattles the crossbar — so close!`,
+  (n: string) => `${n} blazes over from the edge of the box.`,
+];
+const CARD_TEMPLATES = [(n: string) => `${n} goes into the book for a cynical foul.`];
 
-function pickGoalScorer(squad: Squad): string {
-  const forwards = squad.starters.filter((s) =>
-    ['LW', 'RW', 'ST', 'LST', 'RST', 'CF', 'CAM', 'LAM', 'RAM'].includes(s.slot)
+function pickScorer(squad: Squad): DraftedPlayer {
+  const fwd = squad.starters.filter(
+    (s) => ATT_SLOTS.has(s.slot) || ['CAM', 'LCAM', 'RCAM', 'CCAM'].includes(s.slot)
   );
-  const pool = forwards.length > 0 ? forwards : squad.starters;
-  // Weight by SHO stat
-  const total = pool.reduce((s, p) => s + p.player.sho, 0);
+  const pool = fwd.length ? fwd : squad.starters;
+  const total = pool.reduce((a, p) => a + p.player.sho, 0) || 1;
   let r = Math.random() * total;
   for (const p of pool) {
     r -= p.player.sho;
-    if (r <= 0) return p.player.name;
+    if (r <= 0) return p;
   }
-  return pool[pool.length - 1].player.name;
-}
-
-function pickRandomName(squad: Squad): string {
-  const idx = Math.floor(Math.random() * squad.starters.length);
-  return squad.starters[idx].player.name;
-}
-
-function pickRandomOpponentName(team: BracketTeam): string {
-  return team.name; // We don't have individual players for AI teams
-}
-
-function generateEvents(
-  userGoals: number,
-  oppGoals: number,
-  userSquad: Squad,
-  opponent: BracketTeam,
-  startMinute = 1,
-  endMinute = 90
-): MatchEvent[] {
-  const events: MatchEvent[] = [];
-
-  // Generate goal events first
-  const userGoalMinutes: number[] = [];
-  const oppGoalMinutes: number[] = [];
-
-  for (let i = 0; i < userGoals; i++) {
-    userGoalMinutes.push(
-      Math.floor(Math.random() * (endMinute - startMinute - 5)) + startMinute + 5
-    );
-  }
-  for (let i = 0; i < oppGoals; i++) {
-    oppGoalMinutes.push(
-      Math.floor(Math.random() * (endMinute - startMinute - 5)) + startMinute + 5
-    );
-  }
-
-  for (const min of userGoalMinutes) {
-    const scorer = pickGoalScorer(userSquad);
-    const template = GOAL_TEMPLATES[Math.floor(Math.random() * GOAL_TEMPLATES.length)];
-    events.push({
-      minute: min,
-      type: 'GOAL',
-      description: `${min}' — ${template(scorer)}`,
-      isUserTeam: true,
-      isGoal: true,
-    });
-  }
-
-  for (const min of oppGoalMinutes) {
-    const template = GOAL_TEMPLATES[Math.floor(Math.random() * GOAL_TEMPLATES.length)];
-    events.push({
-      minute: min,
-      type: 'GOAL',
-      description: `${min}' — ${template(opponent.name)}`,
-      isUserTeam: false,
-      isGoal: true,
-    });
-  }
-
-  // Pad with 3–5 non-goal events
-  const targetCount = 5 + Math.floor(Math.random() * 4); // 5–8 total
-  const padding = Math.max(0, targetCount - events.length);
-
-  for (let i = 0; i < padding; i++) {
-    const isUser = Math.random() > 0.5;
-    const name = isUser
-      ? pickRandomName(userSquad)
-      : pickRandomOpponentName(opponent);
-    const minute =
-      Math.floor(Math.random() * (endMinute - startMinute)) + startMinute;
-    const tpl =
-      NON_GOAL_TEMPLATES[Math.floor(Math.random() * NON_GOAL_TEMPLATES.length)];
-
-    // Avoid substitution before 45'
-    const type: MatchEventType =
-      tpl.type === 'SUBSTITUTION' && minute < 45 ? 'CHANCE' : tpl.type;
-
-    events.push({
-      minute,
-      type,
-      description: `${minute}' — ${tpl.text(name)}`,
-      isUserTeam: isUser,
-      isGoal: false,
-    });
-  }
-
-  return events.sort((a, b) => a.minute - b.minute);
+  return pool[pool.length - 1];
 }
 
 // ─── Player ratings ──────────────────────────────────────────────────────────
 
 function generateRatings(
   starters: DraftedPlayer[],
-  userGoals: number,
+  scorerIds: Map<number, number>,
+  oppGoals: number,
+  possession: number,
   userWon: boolean
 ): PlayerRating[] {
   return starters.map((dp) => {
-    let base = 6.0;
-    // Bonus for win/goals
-    if (userWon) base += 0.3;
-    if (userGoals > 0 && ['LW', 'RW', 'ST', 'LST', 'RST', 'CF'].includes(dp.slot)) {
-      base += 0.2 * Math.min(userGoals, 2);
+    let r = 6.1;
+    const goals = scorerIds.get(dp.player.id) ?? 0;
+    r += goals * 1.0;
+    if (userWon) r += 0.4;
+    const isDef = DEF_SLOTS.has(dp.slot);
+    if (isDef) {
+      if (oppGoals === 0) r += 0.7; // clean sheet
+      else r -= 0.18 * oppGoals; // shipped goals
     }
-    if (['GK', 'LCB', 'RCB', 'CB'].includes(dp.slot) && userWon) base += 0.2;
-    // Random performance variance
-    const variance = (Math.random() - 0.5) * 1.2;
-    const rating = Math.min(9.0, Math.max(5.0, base + variance));
-    return { player: dp, rating: Math.round(rating * 10) / 10 };
+    const isMid = !isDef && !ATT_SLOTS.has(dp.slot);
+    if (isMid && possession > 55) r += 0.3;
+    r += gauss() * 0.5;
+    return { player: dp, rating: clamp(Math.round(r * 10) / 10, 4.5, 9.8) };
   });
 }
 
-// ─── Penalty shootout ────────────────────────────────────────────────────────
+// ─── Penalty shootout (GK-influenced) ──────────────────────────────────────────
 
-function simulatePenalties(
-  userDefense: number,
-  oppDefense: number
-): { userWon: boolean; userPens: number; oppPens: number } {
-  const userConversionBase = 0.72 + (userDefense / 100) * 0.05;
-  const oppConversionBase = 0.72 + (oppDefense / 100) * 0.05;
-
-  let userPens = 0;
-  let oppPens = 0;
-
-  for (let round = 1; round <= 5; round++) {
-    if (Math.random() < userConversionBase) userPens++;
-    if (Math.random() < oppConversionBase) oppPens++;
+function simulatePenalties(userGk: number, oppGk: number): { userWon: boolean; userPens: number; oppPens: number } {
+  // Higher opposing keeper rating lowers your conversion.
+  const userConv = clamp(0.82 - oppGk / 600, 0.6, 0.85);
+  const oppConv = clamp(0.82 - userGk / 600, 0.6, 0.85);
+  let u = 0;
+  let o = 0;
+  for (let i = 0; i < 5; i++) {
+    if (Math.random() < userConv) u++;
+    if (Math.random() < oppConv) o++;
   }
-
-  // Sudden death
-  let sdRound = 0;
-  while (userPens === oppPens && sdRound < 10) {
-    sdRound++;
-    if (Math.random() < userConversionBase) userPens++;
-    if (Math.random() < oppConversionBase) oppPens++;
+  let sd = 0;
+  while (u === o && sd < 12) {
+    sd++;
+    const uu = Math.random() < userConv;
+    const oo = Math.random() < oppConv;
+    if (uu) u++;
+    if (oo) o++;
   }
-
-  // Ultimate fallback
-  if (userPens === oppPens) {
-    userPens += Math.random() > 0.5 ? 1 : 0;
-    oppPens += userPens > oppPens ? 0 : 1;
+  if (u === o) {
+    if (Math.random() < 0.5) u++;
+    else o++;
   }
-
-  return { userWon: userPens > oppPens, userPens, oppPens };
+  return { userWon: u > o, userPens: u, oppPens: o };
 }
 
-// ─── Main simulate function ──────────────────────────────────────────────────
+// ─── Main simulate ─────────────────────────────────────────────────────────────
 
 export function simulateMatch(
   userSquad: Squad,
   opponent: BracketTeam,
-  roundIndex: number // 0=R16, 1=QF, 2=SF, 3=Final
+  roundIndex: number // 0=R16 … 3=Final
 ): MatchResult {
-  const userStats = extractUserStats(userSquad);
-  const oppStats = deriveOpponentStats(opponent.ovr);
+  const u = extractUserStats(userSquad);
+  const o = opponentStats(opponent.ovr);
+  const home = roundIndex <= 2 ? 0.08 : 0;
 
-  // Home advantage in QF/SF
-  const userBonus = roundIndex <= 2 ? 0.15 : 0;
+  // Possession from the midfield battle (chemistry-boosted for the user).
+  const um = u.midfield * u.chemMult;
+  const possession = clamp(Math.round(50 + ((um - o.midfield) / (um + o.midfield)) * 40), 28, 72);
 
-  const userXg = computeXg(
-    userStats.attack,
-    userStats.chemMult,
-    oppStats.defense,
-    oppStats.chemMult,
-    userBonus
-  );
-  const oppXg = computeXg(
-    oppStats.attack,
-    oppStats.chemMult,
-    userStats.defense,
-    userStats.chemMult
-  );
+  const userDefResist = o.defense * 0.7 + o.gk * 0.3;
+  const oppDefResist = (u.defense * 0.7 + u.gk * 0.3) * u.chemMult;
 
-  const userGoals = samplePoisson(userXg);
-  const oppGoals = samplePoisson(oppXg);
+  const userSide = simulateSide(u.attack * u.chemMult, userDefResist, possession, home, 6, 90);
+  const oppSide = simulateSide(o.attack, oppDefResist, 100 - possession, 0, 6, 90);
 
-  let events = generateEvents(userGoals, oppGoals, userSquad, opponent);
-  let wentToET = false;
-  let wentToPenalties = false;
-  let userWon: boolean;
-  let finalUserScore = userGoals;
-  let finalOppScore = oppGoals;
+  let userScore = Math.min(userSide.goals, 7);
+  let oppScore = Math.min(oppSide.goals, 7);
 
-  if (userGoals === oppGoals) {
-    wentToET = true;
-    // Extra time: 2 × 15min periods at reduced xG
-    const etUserXg = userXg * 0.3;
-    const etOppXg = oppXg * 0.3;
-    const etUserGoals = samplePoisson(etUserXg);
-    const etOppGoals = samplePoisson(etOppXg);
+  // Build the event timeline.
+  const events: MatchEvent[] = [];
+  const scorerIds = new Map<number, number>();
 
-    const etEvents = generateEvents(etUserGoals, etOppGoals, userSquad, opponent, 91, 120);
-    events = [...events, ...etEvents];
-
-    finalUserScore += etUserGoals;
-    finalOppScore += etOppGoals;
-
-    if (finalUserScore === finalOppScore) {
-      wentToPenalties = true;
-      const penResult = simulatePenalties(userStats.defense, oppStats.defense);
-      userWon = penResult.userWon;
-    } else {
-      userWon = finalUserScore > finalOppScore;
+  const addGoals = (count: number, minutes: number[], isUser: boolean) => {
+    for (let i = 0; i < count; i++) {
+      const minute = minutes[i] ?? 6 + Math.floor(Math.random() * 84);
+      if (isUser) {
+        const scorer = pickScorer(userSquad);
+        scorerIds.set(scorer.player.id, (scorerIds.get(scorer.player.id) ?? 0) + 1);
+        events.push({ minute, type: 'GOAL', description: `${minute}' — ${rnd(GOAL_TEMPLATES)(scorer.player.name)}`, isUserTeam: true, isGoal: true });
+      } else {
+        events.push({ minute, type: 'GOAL', description: `${minute}' — ${rnd(GOAL_TEMPLATES)(opponent.name)}`, isUserTeam: false, isGoal: true });
+      }
     }
-  } else {
-    userWon = userGoals > oppGoals;
+  };
+  addGoals(userScore, userSide.goalMinutes, true);
+  addGoals(oppScore, oppSide.goalMinutes, false);
+
+  // Flavour: a couple of saves (shots on target that weren't goals) and chances.
+  const flavour = (side: SideResult, isUser: boolean) => {
+    const saves = clamp(side.sot - side.goals, 0, 2);
+    for (let i = 0; i < saves; i++) {
+      const minute = 5 + Math.floor(Math.random() * 85);
+      const name = isUser ? pickScorer(userSquad).player.name : opponent.name;
+      events.push({ minute, type: 'SAVE', description: `${minute}' — ${rnd(SAVE_TEMPLATES)(name)}`, isUserTeam: isUser, isGoal: false });
+    }
+    if (side.shots - side.sot > 1 && Math.random() < 0.7) {
+      const minute = 5 + Math.floor(Math.random() * 85);
+      const name = isUser ? pickScorer(userSquad).player.name : opponent.name;
+      events.push({ minute, type: 'CHANCE', description: `${minute}' — ${rnd(CHANCE_TEMPLATES)(name)}`, isUserTeam: isUser, isGoal: false });
+    }
+  };
+  flavour(userSide, true);
+  flavour(oppSide, false);
+
+  // 0–2 bookings.
+  const cards = Math.floor(Math.random() * 3);
+  for (let i = 0; i < cards; i++) {
+    const isUser = Math.random() < 0.5;
+    const minute = 10 + Math.floor(Math.random() * 80);
+    const name = isUser ? rnd(userSquad.starters).player.name : opponent.name;
+    events.push({ minute, type: 'YELLOW_CARD', description: `${minute}' — ${rnd(CARD_TEMPLATES)(name)}`, isUserTeam: isUser, isGoal: false });
   }
 
-  const possession = Math.round(
-    50 + ((userStats.midfield - oppStats.midfield) / 100) * 30
-  );
+  // Extra time + penalties on a draw.
+  let wentToET = false;
+  let wentToPenalties = false;
+  let userPenScore: number | undefined;
+  let oppPenScore: number | undefined;
+  let userWon: boolean;
 
-  const userShots = Math.max(userGoals, Math.round(userXg * 3.5));
-  const oppShots = Math.max(oppGoals, Math.round(oppXg * 3.5));
+  if (userScore === oppScore) {
+    wentToET = true;
+    const etUser = simulateSide(u.attack * u.chemMult, userDefResist, possession, home, 91, 120, 0.33);
+    const etOpp = simulateSide(o.attack, oppDefResist, 100 - possession, 0, 91, 120, 0.33);
+    addGoals(etUser.goals, etUser.goalMinutes, true);
+    addGoals(etOpp.goals, etOpp.goalMinutes, false);
+    userScore += etUser.goals;
+    oppScore += etOpp.goals;
+    if (userScore === oppScore) {
+      wentToPenalties = true;
+      const pens = simulatePenalties(u.gk, o.gk);
+      userPenScore = pens.userPens;
+      oppPenScore = pens.oppPens;
+      userWon = pens.userWon;
+    } else {
+      userWon = userScore > oppScore;
+    }
+  } else {
+    userWon = userScore > oppScore;
+  }
 
-  const ratings = generateRatings(userSquad.starters, finalUserScore, userWon);
-  const motmRating = ratings.reduce((best, r) =>
-    r.rating > best.rating ? r : best
-  );
+  events.sort((a, b) => a.minute - b.minute);
+
+  const ratings = generateRatings(userSquad.starters, scorerIds, oppScore, possession, userWon);
+  const motm = ratings.reduce((best, r) => (r.rating > best.rating ? r : best));
 
   return {
-    userScore: finalUserScore,
-    opponentScore: finalOppScore,
+    userScore,
+    opponentScore: oppScore,
     events,
-    possession: Math.min(70, Math.max(30, possession)),
-    userShots,
-    opponentShots: oppShots,
-    userShotsOnTarget: Math.ceil(userShots * 0.45),
-    opponentShotsOnTarget: Math.ceil(oppShots * 0.45),
-    userXg: Math.round(userXg * 10) / 10,
-    opponentXg: Math.round(oppXg * 10) / 10,
+    possession,
+    userShots: userSide.shots,
+    opponentShots: oppSide.shots,
+    userShotsOnTarget: userSide.sot,
+    opponentShotsOnTarget: oppSide.sot,
+    userXg: Math.round(userSide.xg * 10) / 10,
+    opponentXg: Math.round(oppSide.xg * 10) / 10,
+    userBigChances: userSide.bigChances,
+    opponentBigChances: oppSide.bigChances,
+    userCorners: userSide.corners,
+    opponentCorners: oppSide.corners,
     playerRatings: ratings,
-    motm: motmRating.player,
+    motm: motm.player,
     wentToET,
     wentToPenalties,
+    userPenScore,
+    oppPenScore,
     userWon,
   };
 }

@@ -17,6 +17,19 @@ export interface Player {
   nationalityId: number;
   nationalityName: string;
   imageUrl: string;
+  badgeUrl?: string;  // baked sofifa club badge URL
+  flagUrl?: string;   // baked sofifa nation flag URL
+  isLegend?: boolean; // FUT Legend / Icon (special chemistry + card art)
+}
+
+// ─── Manager ──────────────────────────────────────────────────────────────────
+
+export interface Manager {
+  id: string;
+  name: string;
+  nationalityName: string;
+  nationalityId: number;
+  leagueName: string;
 }
 
 // ─── Formation ──────────────────────────────────────────────────────────────
@@ -32,6 +45,8 @@ export interface Formation {
   name: string;       // e.g. "4-3-3"
   label: string;      // e.g. "Balanced"
   positions: FormationPosition[];
+  /** Explicit chemistry adjacency keyed by slot name (FIFA-accurate link map). */
+  links?: Record<string, string[]>;
 }
 
 // ─── Squad Building ──────────────────────────────────────────────────────────
@@ -39,24 +54,36 @@ export interface Formation {
 export interface DraftedPlayer {
   player: Player;
   slot: string;       // formation slot label, e.g. "LW"
-  slotIndex: number;  // 0–10 for starters, 0–4 for subs
-  chemistry: number;  // 1–10 individual chemistry score
+  slotIndex: number;  // 0–10 for starters; bench uses its own index
+  chemistry: number;  // 0–10 individual chemistry score
+  outOfPosition?: boolean; // true if player's natural position doesn't match slot
 }
 
 export interface Squad {
   formation: Formation;
-  starters: DraftedPlayer[];
-  subs: DraftedPlayer[];
+  starters: DraftedPlayer[];  // 11
+  subs: DraftedPlayer[];      // 7
+  reserves: DraftedPlayer[];  // 5
+  manager: Manager | null;
   teamName: string;
   ovrAvg: number;       // average OVR of 11 starters, 0–100
   chemistry: number;    // normalized 0–100
   draftScore: number;   // ovrAvg + chemistry, max 200
 }
 
-// ─── Chemistry ───────────────────────────────────────────────────────────────
+// ─── Chemistry (FUT-style) ─────────────────────────────────────────────────────
+
+export type LinkQuality = 'green' | 'yellow' | 'red' | 'none';
+
+export interface ChemistryLink {
+  from: number;          // starter slotIndex
+  to: number;            // starter slotIndex
+  quality: LinkQuality;  // green = strong, yellow = weak, red = none
+}
 
 export interface ChemistryPreview {
-  perPlayer: number[];    // chemistry score for each starter slot (1–10)
+  perPlayer: number[];    // chemistry 0–10 for each starter slot (by slotIndex)
+  links: ChemistryLink[]; // links between adjacent starters (for pitch lines)
   total: number;          // normalized 0–100
 }
 
@@ -123,10 +150,17 @@ export interface MatchResult {
   opponentShotsOnTarget: number;
   userXg: number;
   opponentXg: number;
+  userBigChances?: number;
+  opponentBigChances?: number;
+  userCorners?: number;
+  opponentCorners?: number;
+  userPossessionWon?: number;
   playerRatings: PlayerRating[];
   motm: DraftedPlayer;    // man of the match
   wentToET: boolean;
   wentToPenalties: boolean;
+  userPenScore?: number;
+  oppPenScore?: number;
   userWon: boolean;
 }
 
@@ -146,8 +180,8 @@ export interface LeaderboardEntry {
 export enum GameState {
   LANDING = 'LANDING',
   FORMATION_PICK = 'FORMATION_PICK',
-  DRAFT = 'DRAFT',
-  SUB_DRAFT = 'SUB_DRAFT',
+  DRAFT = 'DRAFT',          // 11 starters + bench
+  MANAGER_PICK = 'MANAGER_PICK',
   DRAFT_SCORE = 'DRAFT_SCORE',
   BRACKET_VIEW = 'BRACKET_VIEW',
   MATCH_SIM = 'MATCH_SIM',

@@ -2,86 +2,56 @@ import type { BracketTeam, BracketMatch, BracketRound, Squad } from '@/types';
 
 // ─── Real UCL clubs ──────────────────────────────────────────────────────────
 
+const badge = (teamId: number) => `https://cdn.sofifa.net/teams/${teamId}/60.png`;
+
 const UCL_CLUBS: Omit<BracketTeam, 'seed'>[] = [
-  { id: 'real-madrid', name: 'Real Madrid', ovr: 88, isUser: false },
-  { id: 'man-city', name: 'Manchester City', ovr: 87, isUser: false },
-  { id: 'bayern', name: 'Bayern Munich', ovr: 86, isUser: false },
-  { id: 'psg', name: 'Paris Saint-Germain', ovr: 85, isUser: false },
-  { id: 'barcelona', name: 'Barcelona', ovr: 85, isUser: false },
-  { id: 'arsenal', name: 'Arsenal', ovr: 84, isUser: false },
-  { id: 'leverkusen', name: 'Bayer Leverkusen', ovr: 83, isUser: false },
-  { id: 'atletico', name: 'Atlético Madrid', ovr: 83, isUser: false },
-  { id: 'inter', name: 'Inter Milan', ovr: 83, isUser: false },
-  { id: 'dortmund', name: 'Borussia Dortmund', ovr: 82, isUser: false },
-  { id: 'leipzig', name: 'RB Leipzig', ovr: 81, isUser: false },
-  { id: 'juventus', name: 'Juventus', ovr: 81, isUser: false },
-  { id: 'porto', name: 'Porto', ovr: 80, isUser: false },
-  { id: 'benfica', name: 'Benfica', ovr: 80, isUser: false },
-  { id: 'monaco', name: 'Monaco', ovr: 79, isUser: false },
+  { id: 'real-madrid', name: 'Real Madrid', ovr: 88, isUser: false, badgeUrl: badge(243) },
+  { id: 'man-city', name: 'Manchester City', ovr: 87, isUser: false, badgeUrl: badge(10) },
+  { id: 'bayern', name: 'Bayern Munich', ovr: 86, isUser: false, badgeUrl: badge(21) },
+  { id: 'psg', name: 'Paris Saint-Germain', ovr: 85, isUser: false, badgeUrl: badge(73) },
+  { id: 'barcelona', name: 'Barcelona', ovr: 85, isUser: false, badgeUrl: badge(241) },
+  { id: 'arsenal', name: 'Arsenal', ovr: 84, isUser: false, badgeUrl: badge(1) },
+  { id: 'leverkusen', name: 'Bayer Leverkusen', ovr: 83, isUser: false, badgeUrl: badge(32) },
+  { id: 'atletico', name: 'Atlético Madrid', ovr: 83, isUser: false, badgeUrl: badge(240) },
+  { id: 'inter', name: 'Inter Milan', ovr: 83, isUser: false, badgeUrl: badge(44) },
+  { id: 'dortmund', name: 'Borussia Dortmund', ovr: 82, isUser: false, badgeUrl: badge(22) },
+  { id: 'leipzig', name: 'RB Leipzig', ovr: 81, isUser: false, badgeUrl: badge(112172) },
+  { id: 'juventus', name: 'Juventus', ovr: 81, isUser: false, badgeUrl: badge(45) },
+  { id: 'porto', name: 'Porto', ovr: 80, isUser: false, badgeUrl: badge(236) },
+  { id: 'benfica', name: 'Benfica', ovr: 80, isUser: false, badgeUrl: badge(234) },
+  { id: 'monaco', name: 'Monaco', ovr: 79, isUser: false, badgeUrl: badge(69) },
 ];
-
-// Standard 16-team seeding bracket: [seedA, seedB]
-const SEED_PAIRS: [number, number][] = [
-  [1, 16],
-  [8, 9],
-  [5, 12],
-  [4, 13],
-  [3, 14],
-  [6, 11],
-  [7, 10],
-  [2, 15],
-];
-
-// ─── Seeding ──────────────────────────────────────────────────────────────────
-
-/**
- * Determine user's seed (1–16) based on draft score.
- * 190+ → seed 1–4, 180–189 → 5–8, 170–179 → 9–12, <170 → 13–16
- */
-function getUserSeed(draftScore: number): number {
-  if (draftScore >= 190) return 1 + Math.floor(Math.random() * 4);      // 1–4
-  if (draftScore >= 180) return 5 + Math.floor(Math.random() * 4);      // 5–8
-  if (draftScore >= 170) return 9 + Math.floor(Math.random() * 4);      // 9–12
-  return 13 + Math.floor(Math.random() * 4);                            // 13–16
-}
 
 // ─── Bracket generation ───────────────────────────────────────────────────────
 
 export function generateBracket(squad: Squad): BracketRound[] {
-  const userSeed = getUserSeed(squad.draftScore);
-
-  // Build seeded list of all 16 teams
+  // Random open draw: all 16 teams (user + 15 UCL clubs) shuffled into the
+  // bracket with no seeding — you can draw anyone, anytime.
   const userTeam: BracketTeam = {
     id: 'user',
     name: squad.teamName,
     ovr: squad.ovrAvg,
     isUser: true,
-    seed: userSeed,
+    seed: 0,
+    badgeUrl: badge(918), // FK Bodø/Glimt crest
   };
 
-  // Seed AI clubs by OVR descending
-  const aiClubs = [...UCL_CLUBS]
-    .sort((a, b) => b.ovr - a.ovr)
-    .map((club, idx) => ({
-      ...club,
-      seed: idx + 1 < userSeed ? idx + 1 : idx + 2, // skip user's seed
-    }));
+  const allTeams: BracketTeam[] = [
+    userTeam,
+    ...UCL_CLUBS.map((club, i) => ({ ...club, seed: i + 1 })),
+  ];
 
-  // Build ordered seed map: seed → team
-  const seededTeams: Record<number, BracketTeam> = {};
-  seededTeams[userSeed] = userTeam;
-  let aiIdx = 0;
-  for (let seed = 1; seed <= 16; seed++) {
-    if (seed === userSeed) continue;
-    seededTeams[seed] = { ...aiClubs[aiIdx], seed };
-    aiIdx++;
+  // Fisher–Yates shuffle
+  for (let i = allTeams.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [allTeams[i], allTeams[j]] = [allTeams[j], allTeams[i]];
   }
 
-  // R16 matches from seed pairs
-  const r16Matches: BracketMatch[] = SEED_PAIRS.map(([sA, sB], idx) => ({
+  // Pair consecutive teams into the 8 Round-of-16 matches
+  const r16Matches: BracketMatch[] = Array.from({ length: 8 }, (_, idx) => ({
     id: `r16-${idx}`,
-    teamA: seededTeams[sA],
-    teamB: seededTeams[sB],
+    teamA: allTeams[idx * 2],
+    teamB: allTeams[idx * 2 + 1],
     winner: null,
     scoreA: null,
     scoreB: null,
@@ -153,16 +123,32 @@ function simulateAiMatch(teamA: BracketTeam, teamB: BracketTeam): {
   scoreA: number;
   scoreB: number;
 } {
-  const diff = (teamA.ovr - teamB.ovr) / 20; // -1 to 1
-  const probA = 0.5 + diff * 0.25;
-  const aWins = Math.random() < probA;
-  const scoreA = Math.floor(Math.random() * 3) + (aWins ? 1 : 0);
-  const scoreB = Math.floor(Math.random() * 3) + (aWins ? 0 : 1);
-  return {
-    winner: aWins ? teamA : teamB,
-    scoreA,
-    scoreB,
+  // Logistic win probability from the rating gap — favourites usually win, but
+  // upsets are very much on the table (a 5-OVR gap ≈ 64/36).
+  const diff = teamA.ovr - teamB.ovr;
+  const probA = 1 / (1 + Math.pow(10, -diff / 12));
+
+  // Expected goals scale with each side's attack vs the other's defence.
+  const lambda = (att: number, def: number) => Math.max(0.25, 0.9 + (att - def) / 12);
+  const poisson = (l: number) => {
+    const L = Math.exp(-l);
+    let k = 0;
+    let p = 1;
+    do {
+      k++;
+      p *= Math.random();
+    } while (p > L);
+    return k - 1;
   };
+  let scoreA = Math.min(6, poisson(lambda(teamA.ovr + 1, teamB.ovr)));
+  let scoreB = Math.min(6, poisson(lambda(teamB.ovr + 1, teamA.ovr)));
+
+  // On a draw, decide by the logistic probability (extra time / pens).
+  if (scoreA === scoreB) {
+    if (Math.random() < probA) scoreA++;
+    else scoreB++;
+  }
+  return { winner: scoreA > scoreB ? teamA : teamB, scoreA, scoreB };
 }
 
 // ─── Progress bracket after a round ──────────────────────────────────────────
@@ -217,13 +203,16 @@ export function progressBracket(
 
 /**
  * Apply the user's match result to the bracket.
+ * `userWon` is authoritative (handles penalty-shootout wins where scores are level)
+ * and correctly assigns the winner whether the user is teamA or teamB.
  */
 export function applyUserResult(
   rounds: BracketRound[],
   roundIndex: number,
   matchIndex: number,
   userScore: number,
-  oppScore: number
+  oppScore: number,
+  userWon: boolean
 ): BracketRound[] {
   const updated = rounds.map((r) => ({
     ...r,
@@ -233,11 +222,30 @@ export function applyUserResult(
   const match = updated[roundIndex].matches[matchIndex];
   if (!match) return updated;
 
-  match.scoreA = match.teamA.isUser ? userScore : oppScore;
-  match.scoreB = match.teamB.isUser ? userScore : oppScore;
-  match.winner = userScore > oppScore ? match.teamA : match.teamB;
+  const userIsA = match.teamA.isUser;
+  match.scoreA = userIsA ? userScore : oppScore;
+  match.scoreB = userIsA ? oppScore : userScore;
+  // winner is the user's side iff the user won
+  match.winner = userWon === userIsA ? match.teamA : match.teamB;
 
   return updated;
+}
+
+/**
+ * Simulate every remaining round (AI vs AI) from `fromRoundIndex` through the
+ * final, returning the completed bracket and the tournament champion.
+ * Used when the user is eliminated, to show who lifts the trophy.
+ */
+export function simulateToChampion(
+  rounds: BracketRound[],
+  fromRoundIndex: number
+): { bracket: BracketRound[]; champion: BracketTeam | null } {
+  let b = rounds;
+  for (let r = fromRoundIndex; r <= 3; r++) {
+    b = progressBracket(b, r);
+  }
+  const champion = b[3]?.matches[0]?.winner ?? null;
+  return { bracket: b, champion };
 }
 
 /**
