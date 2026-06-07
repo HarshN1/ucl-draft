@@ -1,64 +1,27 @@
 #!/usr/bin/env node
 /**
  * process-players.js
- * Reads data/players.csv (Kaggle FC26 export) and writes public/data/players.json.
+ * Reads the rovnez "FC 26 (FIFA 26) Player Data" Kaggle CSV (sofifa scrape) from
+ * /data and writes /public/data/players.json.
  *
- * Usage:
- *   node scripts/process-players.js
- *   npm run generate
+ * Usage:  node scripts/process-players.js   (or: npm run generate)
  *
- * The script auto-detects column names from both common Kaggle FC26 variants.
+ * Auto-detects the CSV file in /data (first *.csv). Bakes final, verified sofifa
+ * CDN URLs into each record:
+ *   - imageUrl : player_face_url from the dataset (IDs are split into the path)
+ *   - badgeUrl : https://cdn.sofifa.net/teams/{club_team_id}/60.png
+ *   - flagUrl  : https://cdn.sofifa.net/flags/{iso-code}.png  (via nationFlags.json)
  */
 
 const fs = require('fs');
 const path = require('path');
 
-const INPUT_PATH = path.join(__dirname, '..', 'data', 'players.csv');
+const DATA_DIR = path.join(__dirname, '..', 'data');
 const OUTPUT_PATH = path.join(__dirname, '..', 'public', 'data', 'players.json');
+const NATION_FLAGS = require(path.join(__dirname, '..', 'src', 'data', 'nationFlags.json'));
 const MIN_OVR = 70;
 
-// ─── Column name aliases ───────────────────────────────────────────────────────
-// Maps our canonical field names to possible CSV column names (checked in order).
-
-const COLUMN_ALIASES = {
-  id:          ['sofifa_id', 'player_id', 'id', 'ID'],
-  name:        ['short_name', 'name', 'Name', 'player_name'],
-  overall:     ['overall', 'ova', 'Overall', 'OVA'],
-  position:    ['player_positions', 'positions', 'Position', 'preferred_positions', 'pos'],
-  pace:        ['pace', 'pac', 'PAC', 'Pace'],
-  shooting:    ['shooting', 'sho', 'SHO', 'Shooting'],
-  passing:     ['passing', 'pas', 'PAS', 'Passing'],
-  dribbling:   ['dribbling', 'dri', 'DRI', 'Dribbling'],
-  defending:   ['defending', 'def', 'DEF', 'Defending'],
-  physic:      ['physic', 'phy', 'PHY', 'Physical', 'physicality'],
-  clubId:      ['club_team_id', 'club_id', 'team_id', 'Club ID'],
-  clubName:    ['club_name', 'club', 'Club', 'team_name'],
-  leagueName:  ['league_name', 'league', 'League'],
-  nationalityId: ['nationality_id', 'nation_id', 'flag_id'],
-  nationalityName: ['nationality_name', 'nationality', 'Nationality'],
-};
-
-// ─── CSV parser ────────────────────────────────────────────────────────────────
-// Simple but handles quoted fields with commas.
-
-function parseCSV(raw) {
-  const lines = raw.split('\n').filter((l) => l.trim());
-  if (lines.length < 2) throw new Error('CSV appears empty');
-
-  const headers = parseCSVLine(lines[0]);
-
-  const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const values = parseCSVLine(lines[i]);
-    if (values.length < 3) continue; // skip malformed rows
-    const row = {};
-    headers.forEach((h, idx) => {
-      row[h.trim()] = (values[idx] ?? '').trim();
-    });
-    rows.push(row);
-  }
-  return { headers, rows };
-}
+// ─── CSV parsing (handles quoted fields + CRLF) ────────────────────────────────
 
 function parseCSVLine(line) {
   const result = [];
@@ -81,119 +44,135 @@ function parseCSVLine(line) {
     }
   }
   result.push(current);
-  return result;
+  return result.map((c) => c.replace(/\r/g, '').trim());
 }
 
-// ─── Column resolver ──────────────────────────────────────────────────────────
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 
-function buildColumnMap(headers) {
-  const map = {};
-  const missing = [];
-  for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
-    const found = aliases.find((alias) => headers.includes(alias));
-    if (found) {
-      map[field] = found;
-    } else {
-      missing.push(field);
-    }
-  }
-  return { map, missing };
+function getInt(val, fallback = 0) {
+  if (val === undefined || val === '') return fallback;
+  const n = parseInt(String(val).replace(/[^0-9-]/g, ''), 10);
+  return Number.isNaN(n) ? fallback : n;
 }
 
-// ─── Value extractors ─────────────────────────────────────────────────────────
-
-function getInt(row, col, fallback = 0) {
-  const v = row[col];
-  if (!v) return fallback;
-  const n = parseInt(String(v).replace(/[^0-9-]/g, ''), 10);
-  return isNaN(n) ? fallback : n;
+function findCsv() {
+  const files = fs.readdirSync(DATA_DIR).filter((f) => f.toLowerCase().endsWith('.csv'));
+  if (files.length === 0) return null;
+  // Prefer a file that looks like the FC26 export
+  const preferred = files.find((f) => /fc.?26/i.test(f)) || files[0];
+  return path.join(DATA_DIR, preferred);
 }
 
-function getString(row, col, fallback = '') {
-  return (row[col] ?? fallback).trim();
-}
-
-function getPrimaryPosition(posStr) {
-  if (!posStr) return 'ST';
-  // Positions can be comma-separated: "ST, CF" → take first
-  return posStr.split(/[,|]/)[0].trim().toUpperCase();
+function flagUrl(nationName) {
+  const code = NATION_FLAGS[nationName];
+  return code ? `https://cdn.sofifa.net/flags/${code}.png` : '';
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 function main() {
-  if (!fs.existsSync(INPUT_PATH)) {
-    console.error(`\n❌  Input file not found: ${INPUT_PATH}`);
-    console.error('    Download a player CSV from Kaggle and place it at data/players.csv\n');
+  const inputPath = findCsv();
+  if (!inputPath) {
+    console.error(`\n❌  No CSV found in ${DATA_DIR}`);
+    console.error('    Download the rovnez FC 26 dataset and place the .csv in /data\n');
     process.exit(1);
   }
 
-  console.log(`📂  Reading ${INPUT_PATH}...`);
-  const raw = fs.readFileSync(INPUT_PATH, 'utf8');
+  console.log(`📂  Reading ${path.basename(inputPath)} ...`);
+  const raw = fs.readFileSync(inputPath, 'utf8');
+  const lines = raw.split(/\r?\n/);
+  const header = parseCSVLine(lines[0]);
 
-  const { headers, rows } = parseCSV(raw);
-  console.log(`    Found ${rows.length} rows, ${headers.length} columns.`);
+  const idx = {};
+  header.forEach((h, i) => (idx[h] = i));
 
-  const { map, missing } = buildColumnMap(headers);
-  if (missing.length > 0) {
-    console.warn(`⚠️   Could not find columns for: ${missing.join(', ')}`);
-    console.warn('    Available columns:', headers.slice(0, 20).join(', '));
+  // Required columns (rovnez sofifa schema)
+  const required = ['player_id', 'short_name', 'overall', 'player_positions', 'player_face_url'];
+  const missing = required.filter((c) => idx[c] === undefined);
+  if (missing.length) {
+    console.error(`❌  Missing expected columns: ${missing.join(', ')}`);
+    console.error('    First columns found:', header.slice(0, 15).join(', '));
+    process.exit(1);
   }
 
   const players = [];
-  let skippedLowOvr = 0;
-  let skippedMissing = 0;
-  const seenIds = new Set();
+  const seen = new Set();
+  let skippedLow = 0;
+  let skippedBad = 0;
+  let missingFlag = 0;
+  const unmappedNations = new Set();
 
-  for (const row of rows) {
-    const id = getInt(row, map.id);
-    if (!id || seenIds.has(id)) { skippedMissing++; continue; }
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const r = parseCSVLine(lines[i]);
 
-    const overall = getInt(row, map.overall);
-    if (overall < MIN_OVR) { skippedLowOvr++; continue; }
+    const id = getInt(r[idx.player_id]);
+    if (!id || seen.has(id)) { skippedBad++; continue; }
 
-    const name = getString(row, map.name);
-    if (!name) { skippedMissing++; continue; }
+    const overall = getInt(r[idx.overall]);
+    if (overall < MIN_OVR) { skippedLow++; continue; }
 
-    const position = getPrimaryPosition(getString(row, map.position));
-    const clubId = getInt(row, map.clubId);
-    const nationalityId = getInt(row, map.nationalityId);
+    const name = r[idx.short_name] || r[idx.long_name];
+    if (!name) { skippedBad++; continue; }
 
-    seenIds.add(id);
+    const positions = (r[idx.player_positions] || 'ST').split(',').map((p) => p.trim());
+    const position = (positions[0] || 'ST').toUpperCase();
+    const isGK = position === 'GK';
+
+    // Outfield stats live in pace/shooting/...; GKs use goalkeeping_* columns.
+    const stat = (col, gkCol) => {
+      const v = getInt(r[idx[col]], -1);
+      if (v >= 0) return v;
+      if (isGK && gkCol && idx[gkCol] !== undefined) return getInt(r[idx[gkCol]], overall - 5);
+      return overall - 5;
+    };
+
+    const nationName = r[idx.nationality_name] || 'Unknown';
+    const fUrl = flagUrl(nationName);
+    if (!fUrl && nationName !== 'Unknown') {
+      missingFlag++;
+      unmappedNations.add(nationName);
+    }
+
+    const clubId = getInt(r[idx.club_team_id]);
+
+    seen.add(id);
     players.push({
       id,
       name,
       overall,
       position,
-      pac: getInt(row, map.pace, overall - 5),
-      sho: getInt(row, map.shooting, overall - 5),
-      pas: getInt(row, map.passing, overall - 5),
-      dri: getInt(row, map.dribbling, overall - 5),
-      def: getInt(row, map.defending, 50),
-      phy: getInt(row, map.physic, overall - 5),
+      pac: stat('pace', 'goalkeeping_diving'),
+      sho: stat('shooting', 'goalkeeping_handling'),
+      pas: stat('passing', 'goalkeeping_kicking'),
+      dri: stat('dribbling', 'goalkeeping_reflexes'),
+      def: stat('defending', 'goalkeeping_speed'),
+      phy: stat('physic', 'goalkeeping_positioning'),
       clubId,
-      clubName: getString(row, map.clubName, 'Unknown Club'),
-      leagueName: getString(row, map.leagueName, 'Unknown League'),
-      nationalityId,
-      nationalityName: getString(row, map.nationalityName, 'Unknown'),
-      imageUrl: `https://cdn.sofifa.net/players/${id}/26_120.png`,
+      clubName: r[idx.club_name] || 'Free Agent',
+      leagueName: r[idx.league_name] || '',
+      nationalityId: getInt(r[idx.nationality_id]),
+      nationalityName: nationName,
+      imageUrl: (r[idx.player_face_url] || '').trim(),
+      badgeUrl: clubId ? `https://cdn.sofifa.net/teams/${clubId}/60.png` : '',
+      flagUrl: fUrl,
     });
   }
 
-  // Sort by OVR descending for deterministic output
   players.sort((a, b) => b.overall - a.overall);
 
-  const outputDir = path.dirname(OUTPUT_PATH);
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true });
-  }
-
-  fs.writeFileSync(OUTPUT_PATH, JSON.stringify(players, null, 0));
+  const outDir = path.dirname(OUTPUT_PATH);
+  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(OUTPUT_PATH, JSON.stringify(players));
 
   console.log(`\n✅  Done!`);
-  console.log(`    Players included (OVR ≥ ${MIN_OVR}): ${players.length}`);
-  console.log(`    Skipped (low OVR):    ${skippedLowOvr}`);
-  console.log(`    Skipped (invalid):    ${skippedMissing}`);
+  console.log(`    Players (OVR ≥ ${MIN_OVR}):  ${players.length}`);
+  console.log(`    Skipped (low OVR):    ${skippedLow}`);
+  console.log(`    Skipped (invalid):    ${skippedBad}`);
+  console.log(`    Players missing flag: ${missingFlag}`);
+  if (unmappedNations.size) {
+    console.log(`    Unmapped nations:     ${[...unmappedNations].join(', ')}`);
+  }
   console.log(`    Output:               ${OUTPUT_PATH}`);
   console.log(`    File size:            ${(fs.statSync(OUTPUT_PATH).size / 1024).toFixed(0)} KB\n`);
 }
