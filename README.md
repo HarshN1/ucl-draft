@@ -1,123 +1,68 @@
-# UCL Draft
+# FUT Draft — UCL Edition
 
-A FIFA FUT Draft-inspired web game themed around the UEFA Champions League knockout stages. Build your ultimate squad, earn a Draft Score (OVR + Chemistry, max 200), enter a 16-team bracket, and simulate your way to European glory.
+A free, nostalgic FIFA 16 FUT Draft experience with today's players, clubs, and leagues. Build a 23-man squad, chase a 194 Draft Score, and battle through a chaotic 16-team UCL knockout bracket.
+
+**No coins. No paywalls. Just draft.**
 
 ## Features
 
-- **Formation pick** — choose from 8 real formations (5 shown randomly per run)
-- **Captain pick** — select any 85+ OVR player as captain
-- **Position-by-position draft** — 11 starters + 5 subs, each from 5 weighted random card choices
-- **Live chemistry preview** — see how each candidate affects team chemistry before picking
-- **Draft Score** — Squad OVR (0–100) + Chemistry (0–100) = up to 200. Chase 190+ for "World Class"
-- **16-team UCL bracket** — seeded by your Draft Score; face Real Madrid, Man City, Bayern and more
-- **Match simulation** — Poisson xG engine, 5–8 animated match events, player ratings, MOTM
-- **Leaderboard** — top scores saved to localStorage
+- **Formation pick** — 5 random formations from 8 real layouts (FIFA 16 style)
+- **Captain pick** — weighted draw from 85+ OVR players
+- **23-man draft** — 11 starters + 7 subs + 5 reserve wildcards, position-by-position
+- **Live chemistry** — green/yellow/red links on the pitch, manager boost, FUT Legends
+- **Draft Score** — Squad OVR + Chemistry (max 200). Chase 190+ for World Class
+- **Random UCL bracket** — you can draw Real Madrid in the Round of 16. Chaos is the point.
+- **Match simulation** — xG engine, animated events, ratings, MOTM, ET + penalties
+- **Global leaderboard** — Upstash Redis on Vercel (falls back to localStorage offline)
 
 ## Tech Stack
 
-- **Next.js 14** (App Router) · TypeScript · Tailwind CSS
-- Client-side only — no backend, no database
-- Deploys to Vercel free tier
+- **Next.js 14** (App Router) · TypeScript · Tailwind CSS · Vitest
+- Player data from FC 26 Kaggle CSV → `players.json`
+- `/api/img` proxy for sofifa CDN assets
+- `/api/leaderboard` for global scores (Vercel KV / Upstash)
 
 ---
 
 ## Getting Started
 
-### 1. Install dependencies
-
 ```bash
 npm install
-```
-
-### 2. Add player data
-
-Download one of these Kaggle datasets and place the CSV at `data/players.csv`:
-
-- [FC 26 / FIFA 26 Player Data](https://www.kaggle.com/datasets/rovnez/fc-26-fifa-26-player-data)
-- [EA FC 26 Player Database](https://www.kaggle.com/datasets/flynn28/eafc26-player-database)
-
-Then process it:
-
-```bash
-npm run generate
-```
-
-This creates `public/data/players.json` (~600 KB, players OVR ≥ 70).
-
-> **Without the CSV**, the app ships with 29 mock players so you can test the full game flow immediately.
-
-### 3. Run locally
-
-```bash
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
+Player data is already generated in `public/data/players.json` (5,250 players, OVR ≥ 70).
+
+To regenerate from CSV:
+
+```bash
+# Place any *.csv in data/ (e.g. data/FC26_20250921.csv)
+npm run generate
+```
+
 ---
 
 ## Deploy to Vercel
 
-### Option A — players.json committed
+1. Push to GitHub
+2. Import repo at [vercel.com](https://vercel.com) — Next.js auto-detected
+3. Build command: `npm run build` (default)
+4. **Optional — global leaderboard:** Install [Upstash Redis](https://vercel.com/marketplace/upstash) from Vercel Marketplace. Env vars `KV_REST_API_URL` and `KV_REST_API_TOKEN` are auto-set.
+5. Deploy
 
-If you've already run `npm run generate` locally:
-
-1. Commit `public/data/players.json` to git
-2. Push to GitHub
-3. Connect the repo to [vercel.com](https://vercel.com) — framework auto-detected as Next.js
-4. Deploy
-
-### Option B — generate at build time
-
-If you commit `data/players.csv` to git (check file size — Kaggle CSVs can be ~10 MB):
-
-1. In Vercel project settings → Build Command: `npm run generate && npm run build`
-2. Or add to `package.json`:
-   ```json
-   "prebuild": "node scripts/process-players.js"
-   ```
-3. Deploy normally — Vercel runs the generate step before building
-
-### Environment variables
-
-None required. The app is fully static.
+Without KV, the game works fully — leaderboard saves locally in the browser.
 
 ---
 
-## Project Structure
+## Tests
 
+```bash
+npm run test:run
 ```
-ucl-draft/
-├── data/               ← DROP players.csv HERE
-│   └── players.csv
-├── public/
-│   └── data/
-│       └── players.json   ← generated output
-├── scripts/
-│   └── process-players.js ← CSV → JSON pipeline
-└── src/
-    ├── app/               ← Next.js App Router shell
-    ├── components/
-    │   ├── draft/         ← PlayerCard, DraftPicker, FormationPicker...
-    │   ├── bracket/       ← UCLBracket, BracketMatchCard
-    │   ├── match/         ← EventFeed, MatchStats, PostMatchModal
-    │   └── ui/            ← Button, Modal, Leaderboard
-    ├── data/
-    │   ├── formations.ts  ← 8 formation definitions with pitch coords
-    │   └── mockPlayers.ts ← 29 development fixtures
-    ├── engine/
-    │   ├── chemistryEngine.ts  ← link scoring, adjacency graph
-    │   ├── matchSimulator.ts   ← Poisson xG, event generation
-    │   ├── bracketEngine.ts    ← 16-team seeded bracket
-    │   └── playerUtils.ts      ← weighted draw, captain selection
-    ├── hooks/
-    │   ├── useDraft.ts         ← central game state machine
-    │   ├── useLeaderboard.ts   ← localStorage persistence
-    │   └── useSound.ts         ← Web Audio API wrapper
-    ├── screens/           ← full-page screen components
-    └── types/
-        └── index.ts       ← all TypeScript interfaces
-```
+
+37 unit tests cover chemistry, bracket, player draws, and match simulation engines.
 
 ---
 
@@ -125,9 +70,9 @@ ucl-draft/
 
 | Score | Tier |
 |-------|------|
-| 190–200 | 🏆 World Class Draft |
-| 180–189 | ⭐⭐⭐ Elite Draft |
-| 170–179 | ⭐⭐ Strong Draft |
-| < 170 | ⭐ Good Draft |
+| 190–200 | World Class Draft |
+| 180–189 | Elite Draft |
+| 170–179 | Strong Draft |
+| < 170 | Good Draft |
 
-The YouTube FUT Draft community considers 194 to be world-class. Can you beat it?
+The FUT Draft community considers 194 world-class. Can you beat it?

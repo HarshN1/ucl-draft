@@ -37,3 +37,6 @@ next-env.d.ts
 
 # claude code local settings (machine-specific)
 .claude/settings.local.json
+
+# cursor local
+.cursor/
