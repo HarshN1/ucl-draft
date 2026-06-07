@@ -22,6 +22,7 @@ interface SquadBoardProps {
   chem: ChemistryPreview;
   activeSlot: ActiveSlot | null;
   draggingSlot: ActiveSlot | null;
+  swapSource: ActiveSlot | null;
   onSlotClick: (slot: ActiveSlot) => void;
   onDragStart: (slot: ActiveSlot) => void;
   onDrop: (slot: ActiveSlot) => void;
@@ -46,7 +47,9 @@ function PitchCard({
   chem,
   posFit,
   dragging,
+  swapSelected,
   popoverBelow,
+  onTap,
   onDragStart,
   onDrop,
 }: {
@@ -54,7 +57,9 @@ function PitchCard({
   chem?: number;
   posFit?: PositionFit;
   dragging?: boolean;
+  swapSelected?: boolean;
   popoverBelow?: boolean;
+  onTap?: () => void;
   onDragStart?: () => void;
   onDrop?: () => void;
 }) {
@@ -70,8 +75,13 @@ function PitchCard({
       <div
         draggable
         onDragStart={onDragStart}
-        className={clsx('relative cursor-grab active:cursor-grabbing', dragging && 'opacity-40')}
-        title={`${player.name} — drag to swap`}
+        onClick={onTap}
+        className={clsx(
+          'relative cursor-grab active:cursor-grabbing touch-manipulation',
+          dragging && 'opacity-40',
+          swapSelected && 'glow-active scale-105'
+        )}
+        title={`${player.name} — tap or drag to swap`}
       >
         <PlayerCard player={player} size="2xs" chemScore={chem} posFit={posFit} />
       </div>
@@ -94,6 +104,7 @@ function BenchSlot({
   label,
   active,
   dragging,
+  swapSelected,
   posFit,
   onClick,
   onDragStart,
@@ -103,6 +114,7 @@ function BenchSlot({
   label: string;
   active?: boolean;
   dragging?: boolean;
+  swapSelected?: boolean;
   posFit?: PositionFit;
   onClick?: () => void;
   onDragStart?: () => void;
@@ -130,7 +142,12 @@ function BenchSlot({
       <div
         draggable
         onDragStart={onDragStart}
-        className={clsx('absolute top-0 left-1/2 -translate-x-1/2 cursor-grab active:cursor-grabbing', dragging && 'opacity-40')}
+        onClick={onClick}
+        className={clsx(
+          'absolute top-0 left-1/2 -translate-x-1/2 cursor-grab active:cursor-grabbing touch-manipulation',
+          dragging && 'opacity-40',
+          swapSelected && 'glow-active scale-105'
+        )}
       >
         <PlayerCard player={player} size="2xs" posFit={posFit} />
       </div>
@@ -216,6 +233,7 @@ export function SquadBoard({
   chem,
   activeSlot,
   draggingSlot,
+  swapSource,
   onSlotClick,
   onDragStart,
   onDrop,
@@ -224,6 +242,8 @@ export function SquadBoard({
     activeSlot?.zone === zone && activeSlot.index === i;
   const isDragging = (zone: 'starter' | 'bench', i: number) =>
     draggingSlot?.zone === zone && draggingSlot.index === i;
+  const isSwapSelected = (zone: 'starter' | 'bench', i: number) =>
+    swapSource?.zone === zone && swapSource.index === i;
 
   // Full structural link graph — drawn immediately on formation lock. Each edge
   // is "unlit" charcoal until BOTH its slots are occupied, then it lights up.
@@ -247,6 +267,7 @@ export function SquadBoard({
         label={group}
         active={isActive('bench', i)}
         dragging={isDragging('bench', i)}
+        swapSelected={isSwapSelected('bench', i)}
         posFit={bp && group !== 'RES' ? positionCategory(bp.position, group) : undefined}
         onClick={() => onSlotClick({ zone: 'bench', index: i })}
         onDragStart={() => onDragStart({ zone: 'bench', index: i })}
@@ -322,7 +343,9 @@ export function SquadBoard({
                   chem={chem.perPlayer[i]}
                   posFit={positionCategory(player.position, pos.positionGroup)}
                   dragging={isDragging('starter', i)}
+                  swapSelected={isSwapSelected('starter', i)}
                   popoverBelow={pos.y >= 52}
+                  onTap={() => onSlotClick({ zone: 'starter', index: i })}
                   onDragStart={() => onDragStart({ zone: 'starter', index: i })}
                   onDrop={() => onDrop({ zone: 'starter', index: i })}
                 />

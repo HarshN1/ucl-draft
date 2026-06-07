@@ -23,6 +23,8 @@ interface DraftScreenProps {
   onSelectSlot: (s: ActiveSlot) => void;
   onPickPlayer: (p: Player) => void;
   onSwapSlots: (a: ActiveSlot, b: ActiveSlot) => void;
+  onPlayClick?: () => void;
+  onPlayPick?: () => void;
 }
 
 function Counter({ label, value, color }: { label: string; value: number; color: string }) {
@@ -36,25 +38,75 @@ function Counter({ label, value, color }: { label: string; value: number; color:
   );
 }
 
+function sameSlot(a: ActiveSlot, b: ActiveSlot) {
+  return a.zone === b.zone && a.index === b.index;
+}
+
 export function DraftScreen(props: DraftScreenProps) {
   const {
     formation, awaitingCaptain, starterPlayers, benchPlayers, benchGroups, subsCount,
     activeSlot, currentCards, chemPreview, squadRating, filledCount,
     getChemPreviewForCandidate, onPickCaptain, onSelectSlot,
-    onPickPlayer, onSwapSlots,
+    onPickPlayer, onSwapSlots, onPlayClick, onPlayPick,
   } = props;
 
   const [draggingSlot, setDraggingSlot] = useState<ActiveSlot | null>(null);
+  const [swapSource, setSwapSource] = useState<ActiveSlot | null>(null);
   const picking = awaitingCaptain || !!activeSlot;
 
   const chemColor =
     chemPreview.total > 75 ? '#16d36a' : chemPreview.total >= 50 ? '#e0a000' : '#d63a3a';
 
+  function isOccupied(s: ActiveSlot) {
+    return s.zone === 'starter' ? !!starterPlayers[s.index] : !!benchPlayers[s.index];
+  }
+
+  function handleSlotClick(s: ActiveSlot) {
+    const occupied = isOccupied(s);
+
+    if (swapSource) {
+      if (sameSlot(swapSource, s)) {
+        setSwapSource(null);
+        return;
+      }
+      if (occupied) {
+        onSwapSlots(swapSource, s);
+        onPlayClick?.();
+        setSwapSource(null);
+        return;
+      }
+      setSwapSource(null);
+    }
+
+    if (!occupied && !awaitingCaptain) {
+      onPlayClick?.();
+      onSelectSlot(s);
+      return;
+    }
+
+    if (occupied) {
+      onPlayClick?.();
+      setSwapSource(s);
+    }
+  }
+
   function handleDrop(target: ActiveSlot) {
-    if (draggingSlot && !(draggingSlot.zone === target.zone && draggingSlot.index === target.index)) {
+    if (draggingSlot && !sameSlot(draggingSlot, target)) {
       onSwapSlots(draggingSlot, target);
+      onPlayClick?.();
     }
     setDraggingSlot(null);
+    setSwapSource(null);
+  }
+
+  function handlePickCaptain(p: Player) {
+    onPlayPick?.();
+    onPickCaptain(p);
+  }
+
+  function handlePickPlayer(p: Player) {
+    onPlayPick?.();
+    onPickPlayer(p);
   }
 
   const activeLabel =
@@ -72,7 +124,6 @@ export function DraftScreen(props: DraftScreenProps) {
 
   return (
     <div className="h-full flex flex-col px-4 py-3 overflow-hidden" onDragEnd={() => setDraggingSlot(null)}>
-      {/* Counters */}
       <div className="flex items-center justify-between max-w-4xl mx-auto w-full mb-2 shrink-0">
         <Counter label="Rating" value={squadRating} color="#ffffff" />
         <div className="text-center">
@@ -84,7 +135,6 @@ export function DraftScreen(props: DraftScreenProps) {
         <Counter label="Chemistry" value={chemPreview.total} color={chemColor} />
       </div>
 
-      {/* Board */}
       <div className="max-w-xl mx-auto w-full flex-1 min-h-0 flex flex-col justify-center overflow-visible">
         <SquadBoard
           formation={formation}
@@ -95,29 +145,35 @@ export function DraftScreen(props: DraftScreenProps) {
           chem={chemPreview}
           activeSlot={activeSlot}
           draggingSlot={draggingSlot}
-          onSlotClick={(s) => {
-            const occupied = s.zone === 'starter' ? starterPlayers[s.index] : benchPlayers[s.index];
-            if (!occupied && !awaitingCaptain) onSelectSlot(s);
+          swapSource={swapSource}
+          onSlotClick={handleSlotClick}
+          onDragStart={(s) => {
+            setSwapSource(null);
+            setDraggingSlot(s);
           }}
-          onDragStart={(s) => setDraggingSlot(s)}
           onDrop={handleDrop}
         />
       </div>
 
-      {/* Hint banner when idle */}
       {!picking && (
         <div className="text-center mt-4 font-body text-white/45 text-sm">
-          Tap an <span className="text-accent">empty position</span> to draft it — pick the order
-          yourself. Drag drafted players to rearrange.
+          {swapSource ? (
+            <>
+              Tap another player to <span className="text-gold">swap</span> — tap again to cancel
+            </>
+          ) : (
+            <>
+              Tap an <span className="text-accent">empty slot</span> to draft ·{' '}
+              <span className="text-gold">tap or drag</span> players to rearrange
+            </>
+          )}
         </div>
       )}
 
-      {/* Draft picker modal overlay (contained within the console stage) */}
       {picking && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center">
           <div className="absolute inset-0 draft-overlay" />
           <div className="relative z-10 w-full" style={{ perspective: '1200px' }}>
-            {/* Bar across the screen */}
             <div className="w-full border-y-2 border-gold/50 bg-primary/80 py-4 text-center">
               <div className="font-display text-white/40 text-[10px] uppercase tracking-[0.35em]">
                 {awaitingCaptain ? 'Choose your captain' : `Draft your ${activeLabel}`}
@@ -129,11 +185,11 @@ export function DraftScreen(props: DraftScreenProps) {
 
             <div className="mt-8 flex justify-center px-1">
               {awaitingCaptain ? (
-                <CardChooser cards={currentCards} onPick={onPickCaptain} />
+                <CardChooser cards={currentCards} onPick={handlePickCaptain} />
               ) : (
                 <CardChooser
                   cards={currentCards}
-                  onPick={onPickPlayer}
+                  onPick={handlePickPlayer}
                   chemForCandidate={getChemPreviewForCandidate}
                   baseChem={chemPreview.total}
                   slotGroup={activeGroup}

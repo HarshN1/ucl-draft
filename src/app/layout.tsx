@@ -1,10 +1,28 @@
 import type { Metadata } from 'next';
 import './globals.css';
 
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://ucl-draft.vercel.app';
+
 export const metadata: Metadata = {
   title: 'FUT Draft — Chase 194',
   description:
     'Free FIFA 16-style FUT Draft with today\'s players. Build your squad, chase 194, conquer the UCL bracket.',
+  metadataBase: new URL(siteUrl),
+  openGraph: {
+    title: 'FUT Draft — Chase 194',
+    description:
+      'Free FIFA 16-style FUT Draft. Build your squad, chase 194, conquer the UCL bracket. No coins required.',
+    url: siteUrl,
+    siteName: 'FUT Draft',
+    type: 'website',
+    locale: 'en_US',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'FUT Draft — Chase 194',
+    description:
+      'Free FIFA 16-style FUT Draft. Build your squad, chase 194, conquer the UCL bracket.',
+  },
 };
 
 export default function RootLayout({

@@ -16,7 +16,7 @@ import { TrophyScreen } from '@/screens/TrophyScreen';
 
 export default function Home() {
   const draft = useDraft();
-  const { initAudio, playGoal } = useSound();
+  const { initAudio, playGoal, playClick, playPick } = useSound();
 
   function handleStart() {
     initAudio();
@@ -73,7 +73,10 @@ export default function Home() {
       return (
         <FormationScreen
           formations={draft.formationOptions}
-          onSelect={draft.selectFormation}
+          onSelect={(f) => {
+            playClick();
+            draft.selectFormation(f);
+          }}
         />
       );
 
@@ -100,6 +103,8 @@ export default function Home() {
           onSelectSlot={draft.selectSlot}
           onPickPlayer={draft.pickPlayer}
           onSwapSlots={draft.swapSlots}
+          onPlayClick={playClick}
+          onPlayPick={playPick}
         />
       );
     }
@@ -109,7 +114,10 @@ export default function Home() {
         <ManagerScreen
           managers={draft.managerOptions}
           starters={draft.starterPlayers.filter((p): p is NonNullable<typeof p> => !!p)}
-          onPick={draft.pickManager}
+          onPick={(m) => {
+            playPick();
+            draft.pickManager(m);
+          }}
         />
       );
 
