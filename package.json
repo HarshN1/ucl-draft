@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "generate": "node scripts/process-players.js",
+    "fetch-specials": "node scripts/fetch-special-cards.js",
+    "apply-names": "node scripts/apply-display-names.js",
     "generate:sounds": "node scripts/generate-sounds.js",
     "prebuild": "node scripts/generate-sounds.js",
     "test": "vitest",

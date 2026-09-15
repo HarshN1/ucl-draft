@@ -1,5 +1,6 @@
 import type { Player } from '@/types';
 import nationFlags from '@/data/nationFlags.json';
+import { LEGEND_SOFIFA_IDS, sofifaFaceUrl } from '@/data/legendSofifaIds';
 
 // FUT 16 Legends ("Icons"). Stat order maps to PAC/SHO/PAS/DRI/DEF/PHY (GK
 // stats are mapped onto the same six fields). They use the systemic tokens
@@ -92,7 +93,7 @@ export const LEGENDS: Player[] = RAW.map((r, i) => ({
   leagueName: 'FUT_LEGENDS',
   nationalityId: 0,
   nationalityName: r.nationality,
-  imageUrl: '',
+  imageUrl: LEGEND_SOFIFA_IDS[r.name] ? sofifaFaceUrl(LEGEND_SOFIFA_IDS[r.name]) : '',
   flagUrl: flagUrl(r.nationality),
   isLegend: true,
 }));
