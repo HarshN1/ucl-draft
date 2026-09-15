@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   getAcceptablePositions,
   computeOvrAvg,
@@ -7,9 +7,9 @@ import {
   drawCardsForSlot,
   drawReserveWildcard,
 } from '@/engine/playerUtils';
+import { Rng } from '@/engine/rng';
 import { FORMATION_433, ALL_FORMATIONS } from './fixtures/formations';
 import { TEST_POOL, HAALAND } from './fixtures/players';
-import { mockRandom } from './helpers/mockRandom';
 
 describe('getAcceptablePositions', () => {
   it('returns position lists for known groups', () => {
@@ -37,26 +37,19 @@ describe('computeOvrAvg', () => {
 describe('findBestSlotForCaptain', () => {
   it('places a striker in an attacking slot', () => {
     const slot = findBestSlotForCaptain('ST', FORMATION_433);
-    const pos = FORMATION_433.positions[slot];
+    const pos = FORMATION_433.positions[slot]!;
     expect(['ST', 'WG', 'CAM']).toContain(pos.positionGroup);
   });
 
   it('avoids placing outfield players in GK', () => {
     const slot = findBestSlotForCaptain('CAM', FORMATION_433);
-    expect(FORMATION_433.positions[slot].positionGroup).not.toBe('GK');
+    expect(FORMATION_433.positions[slot]!.positionGroup).not.toBe('GK');
   });
 });
 
 describe('sampleFormations', () => {
-  let restore: (() => void) | undefined;
-
-  afterEach(() => {
-    restore?.();
-  });
-
   it('returns 5 distinct formation names', () => {
-    restore = mockRandom([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.15]);
-    const sampled = sampleFormations(ALL_FORMATIONS);
+    const sampled = sampleFormations(new Rng(1), ALL_FORMATIONS);
     expect(sampled).toHaveLength(5);
     const names = new Set(sampled.map((f) => f.name));
     expect(names.size).toBe(5);
@@ -64,17 +57,8 @@ describe('sampleFormations', () => {
 });
 
 describe('drawCardsForSlot', () => {
-  let restore: (() => void) | undefined;
-
-  afterEach(() => {
-    restore?.();
-  });
-
   it('returns up to 5 unique players for a starter slot', () => {
-    restore = mockRandom(
-      Array.from({ length: 40 }, (_, i) => (i * 0.023) % 1)
-    );
-    const cards = drawCardsForSlot(TEST_POOL, FORMATION_433, 9, [], new Set());
+    const cards = drawCardsForSlot(new Rng(1), TEST_POOL, FORMATION_433, 9, [], new Set());
     expect(cards.length).toBeGreaterThan(0);
     expect(cards.length).toBeLessThanOrEqual(5);
     const ids = new Set(cards.map((p) => p.id));
@@ -82,11 +66,8 @@ describe('drawCardsForSlot', () => {
   });
 
   it('never returns already-drafted players', () => {
-    restore = mockRandom(
-      Array.from({ length: 40 }, (_, i) => (i * 0.031) % 1)
-    );
     const used = new Set(TEST_POOL.slice(0, 3).map((p) => p.id));
-    const cards = drawCardsForSlot(TEST_POOL, FORMATION_433, 9, [], used);
+    const cards = drawCardsForSlot(new Rng(1), TEST_POOL, FORMATION_433, 9, [], used);
     for (const card of cards) {
       expect(used.has(card.id)).toBe(false);
     }
@@ -95,7 +76,7 @@ describe('drawCardsForSlot', () => {
 
 describe('drawReserveWildcard', () => {
   it('returns up to 5 unique players', () => {
-    const cards = drawReserveWildcard(TEST_POOL, new Set());
+    const cards = drawReserveWildcard(new Rng(1), TEST_POOL, new Set());
     expect(cards.length).toBeGreaterThan(0);
     expect(cards.length).toBeLessThanOrEqual(5);
     expect(new Set(cards.map((p) => p.id)).size).toBe(cards.length);
@@ -103,7 +84,7 @@ describe('drawReserveWildcard', () => {
 
   it('never offers more than one goalkeeper per hand', () => {
     for (let i = 0; i < 30; i++) {
-      const cards = drawReserveWildcard(TEST_POOL, new Set());
+      const cards = drawReserveWildcard(new Rng(i + 1), TEST_POOL, new Set());
       const gks = cards.filter((p) => p.position === 'GK');
       expect(gks.length).toBeLessThanOrEqual(1);
     }

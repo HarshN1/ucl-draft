@@ -1,19 +1,12 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { simulateMatch } from '@/engine/matchSimulator';
+import { Rng } from '@/engine/rng';
 import { makeTestSquad } from './fixtures/squads';
 import { OPPONENT } from './fixtures/brackets';
-import { mockRandom } from './helpers/mockRandom';
 
 describe('simulateMatch', () => {
-  let restore: (() => void) | undefined;
-
-  afterEach(() => {
-    restore?.();
-  });
-
   it('returns a complete MatchResult shape', () => {
-    restore = mockRandom(Array.from({ length: 200 }, (_, i) => ((i * 17) % 100) / 100));
-    const result = simulateMatch(makeTestSquad(), OPPONENT, 0);
+    const result = simulateMatch(new Rng(1), makeTestSquad(), OPPONENT, 0);
 
     expect(result.userScore).toBeGreaterThanOrEqual(0);
     expect(result.opponentScore).toBeGreaterThanOrEqual(0);
@@ -26,8 +19,7 @@ describe('simulateMatch', () => {
   });
 
   it('produces goal events matching the final scoreline', () => {
-    restore = mockRandom(Array.from({ length: 200 }, (_, i) => ((i * 13) % 100) / 100));
-    const result = simulateMatch(makeTestSquad(), OPPONENT, 0);
+    const result = simulateMatch(new Rng(1), makeTestSquad(), OPPONENT, 0);
     const userGoals = result.events.filter((e) => e.isGoal && e.isUserTeam).length;
     const oppGoals = result.events.filter((e) => e.isGoal && !e.isUserTeam).length;
     expect(userGoals).toBe(result.userScore);
@@ -35,9 +27,7 @@ describe('simulateMatch', () => {
   });
 
   it('can resolve drawn matches via extra time or penalties', () => {
-    // Bias toward low-scoring outcomes to encourage draws
-    restore = mockRandom(Array.from({ length: 300 }, () => 0.02));
-    const result = simulateMatch(makeTestSquad(), OPPONENT, 3);
+    const result = simulateMatch(new Rng(42), makeTestSquad(), OPPONENT, 3);
     if (result.wentToPenalties) {
       expect(result.userPenScore).toBeDefined();
       expect(result.oppPenScore).toBeDefined();

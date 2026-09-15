@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 import type { Squad, BracketTeam, MatchResult } from '@/types';
-import { simulateMatch } from '@/engine/matchSimulator';
 import { EventFeed } from '@/components/match/EventFeed';
 import { MatchStats } from '@/components/match/MatchStats';
 import { PostMatchModal } from '@/components/match/PostMatchModal';
@@ -14,6 +13,8 @@ interface MatchScreenProps {
   roundIndex: number;
   roundName: string;
   isFinalRound: boolean;
+  matchResult: MatchResult | null;
+  onSimulate: () => void;
   onMatchComplete: (result: MatchResult) => void;
   onContinue: () => void;
   playGoalSound?: () => void;
@@ -22,26 +23,29 @@ interface MatchScreenProps {
 export function MatchScreen({
   squad,
   opponent,
-  roundIndex,
   roundName,
   isFinalRound,
+  matchResult,
+  onSimulate,
   onMatchComplete,
   onContinue,
   playGoalSound,
 }: MatchScreenProps) {
-  const [result, setResult] = useState<MatchResult | null>(null);
   const [eventsComplete, setEventsComplete] = useState(false);
   const [showPostMatch, setShowPostMatch] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
-    const r = simulateMatch(squad, opponent, roundIndex);
-    setResult(r);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!matchResult) onSimulate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function handleAllEventsShown() {
     setEventsComplete(true);
-    if (result) onMatchComplete(result);
+    if (matchResult && !acknowledged) {
+      setAcknowledged(true);
+      onMatchComplete(matchResult);
+    }
   }
 
   function handleContinue() {
@@ -49,6 +53,7 @@ export function MatchScreen({
     onContinue();
   }
 
+  const result = matchResult;
   const userScore = result ? result.userScore : 0;
   const oppScore = result ? result.opponentScore : 0;
 

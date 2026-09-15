@@ -6,13 +6,13 @@ import type {
   PlayerRating,
   DraftedPlayer,
 } from '@/types';
+import type { Rng } from '@/engine/rng';
 
 // ─── Small math helpers ────────────────────────────────────────────────────────
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 /** Roughly-normal noise in [-1.5, 1.5] (sum of three uniforms, centred). */
-const gauss = () => Math.random() + Math.random() + Math.random() - 1.5;
-const rnd = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+const gauss = (rng: Rng) => rng.next() + rng.next() + rng.next() - 1.5;
 
 // ─── Slot → line buckets ───────────────────────────────────────────────────────
 
@@ -86,6 +86,7 @@ interface SideResult {
  * on-target / big-chance / goal using the chance quality vs the opposing keeper.
  */
 function simulateSide(
+  rng: Rng,
   attackPower: number,
   defResist: number,
   possession: number,
@@ -95,26 +96,26 @@ function simulateSide(
   scale = 1
 ): SideResult {
   const shotBase = 3 + attackPower / 14;
-  let shots = Math.round((shotBase * (0.55 + possession / 100) * (1 + homeBonus) + gauss() * 1.6) * scale);
+  let shots = Math.round((shotBase * (0.55 + possession / 100) * (1 + homeBonus) + gauss(rng) * 1.6) * scale);
   shots = clamp(shots, scale < 1 ? 0 : 1, 22);
 
   let xg = 0;
   let sot = 0;
   let bigChances = 0;
-  let corners = Math.max(0, Math.round(shots * 0.5 + gauss()));
+  let corners = Math.max(0, Math.round(shots * 0.5 + gauss(rng)));
   let goals = 0;
   const goalMinutes: number[] = [];
 
   for (let i = 0; i < shots; i++) {
     // Each shot's quality IS its xG — so a shot converts with that probability.
-    const quality = clamp(0.085 + (attackPower - defResist) / 400 + (Math.random() - 0.5) * 0.13, 0.02, 0.85);
+    const quality = clamp(0.085 + (attackPower - defResist) / 400 + (rng.next() - 0.5) * 0.13, 0.02, 0.85);
     xg += quality;
     if (quality > 0.3) bigChances++;
-    if (Math.random() < quality) {
+    if (rng.next() < quality) {
       goals++;
       sot++; // goals are on target
-      goalMinutes.push(minuteLo + Math.floor(Math.random() * Math.max(1, minuteHi - minuteLo)));
-    } else if (Math.random() < clamp(0.33 + attackPower / 300, 0.2, 0.62)) {
+      goalMinutes.push(minuteLo + rng.int(Math.max(1, minuteHi - minuteLo)));
+    } else if (rng.next() < clamp(0.33 + attackPower / 300, 0.2, 0.62)) {
       sot++;
     }
   }
@@ -146,23 +147,24 @@ const CHANCE_TEMPLATES = [
 ];
 const CARD_TEMPLATES = [(n: string) => `${n} goes into the book for a cynical foul.`];
 
-function pickScorer(squad: Squad): DraftedPlayer {
+function pickScorer(rng: Rng, squad: Squad): DraftedPlayer {
   const fwd = squad.starters.filter(
     (s) => ATT_SLOTS.has(s.slot) || ['CAM', 'LCAM', 'RCAM', 'CCAM'].includes(s.slot)
   );
   const pool = fwd.length ? fwd : squad.starters;
   const total = pool.reduce((a, p) => a + p.player.sho, 0) || 1;
-  let r = Math.random() * total;
+  let r = rng.next() * total;
   for (const p of pool) {
     r -= p.player.sho;
     if (r <= 0) return p;
   }
-  return pool[pool.length - 1];
+  return pool[pool.length - 1]!;
 }
 
 // ─── Player ratings ──────────────────────────────────────────────────────────
 
 function generateRatings(
+  rng: Rng,
   starters: DraftedPlayer[],
   scorerIds: Map<number, number>,
   oppGoals: number,
@@ -181,33 +183,37 @@ function generateRatings(
     }
     const isMid = !isDef && !ATT_SLOTS.has(dp.slot);
     if (isMid && possession > 55) r += 0.3;
-    r += gauss() * 0.5;
+    r += gauss(rng) * 0.5;
     return { player: dp, rating: clamp(Math.round(r * 10) / 10, 4.5, 9.8) };
   });
 }
 
 // ─── Penalty shootout (GK-influenced) ──────────────────────────────────────────
 
-function simulatePenalties(userGk: number, oppGk: number): { userWon: boolean; userPens: number; oppPens: number } {
+function simulatePenalties(
+  rng: Rng,
+  userGk: number,
+  oppGk: number
+): { userWon: boolean; userPens: number; oppPens: number } {
   // Higher opposing keeper rating lowers your conversion.
   const userConv = clamp(0.82 - oppGk / 600, 0.6, 0.85);
   const oppConv = clamp(0.82 - userGk / 600, 0.6, 0.85);
   let u = 0;
   let o = 0;
   for (let i = 0; i < 5; i++) {
-    if (Math.random() < userConv) u++;
-    if (Math.random() < oppConv) o++;
+    if (rng.next() < userConv) u++;
+    if (rng.next() < oppConv) o++;
   }
   let sd = 0;
   while (u === o && sd < 12) {
     sd++;
-    const uu = Math.random() < userConv;
-    const oo = Math.random() < oppConv;
+    const uu = rng.next() < userConv;
+    const oo = rng.next() < oppConv;
     if (uu) u++;
     if (oo) o++;
   }
   if (u === o) {
-    if (Math.random() < 0.5) u++;
+    if (rng.next() < 0.5) u++;
     else o++;
   }
   return { userWon: u > o, userPens: u, oppPens: o };
@@ -216,6 +222,7 @@ function simulatePenalties(userGk: number, oppGk: number): { userWon: boolean; u
 // ─── Main simulate ─────────────────────────────────────────────────────────────
 
 export function simulateMatch(
+  rng: Rng,
   userSquad: Squad,
   opponent: BracketTeam,
   roundIndex: number // 0=R16 … 3=Final
@@ -231,8 +238,8 @@ export function simulateMatch(
   const userDefResist = o.defense * 0.7 + o.gk * 0.3;
   const oppDefResist = (u.defense * 0.7 + u.gk * 0.3) * u.chemMult;
 
-  const userSide = simulateSide(u.attack * u.chemMult, userDefResist, possession, home, 6, 90);
-  const oppSide = simulateSide(o.attack, oppDefResist, 100 - possession, 0, 6, 90);
+  const userSide = simulateSide(rng, u.attack * u.chemMult, userDefResist, possession, home, 6, 90);
+  const oppSide = simulateSide(rng, o.attack, oppDefResist, 100 - possession, 0, 6, 90);
 
   let userScore = Math.min(userSide.goals, 7);
   let oppScore = Math.min(oppSide.goals, 7);
@@ -243,13 +250,13 @@ export function simulateMatch(
 
   const addGoals = (count: number, minutes: number[], isUser: boolean) => {
     for (let i = 0; i < count; i++) {
-      const minute = minutes[i] ?? 6 + Math.floor(Math.random() * 84);
+      const minute = minutes[i] ?? 6 + rng.int(84);
       if (isUser) {
-        const scorer = pickScorer(userSquad);
+        const scorer = pickScorer(rng, userSquad);
         scorerIds.set(scorer.player.id, (scorerIds.get(scorer.player.id) ?? 0) + 1);
-        events.push({ minute, type: 'GOAL', description: `${minute}' — ${rnd(GOAL_TEMPLATES)(scorer.player.name)}`, isUserTeam: true, isGoal: true });
+        events.push({ minute, type: 'GOAL', description: `${minute}' — ${rng.pick(GOAL_TEMPLATES)(scorer.player.name)}`, isUserTeam: true, isGoal: true });
       } else {
-        events.push({ minute, type: 'GOAL', description: `${minute}' — ${rnd(GOAL_TEMPLATES)(opponent.name)}`, isUserTeam: false, isGoal: true });
+        events.push({ minute, type: 'GOAL', description: `${minute}' — ${rng.pick(GOAL_TEMPLATES)(opponent.name)}`, isUserTeam: false, isGoal: true });
       }
     }
   };
@@ -260,26 +267,26 @@ export function simulateMatch(
   const flavour = (side: SideResult, isUser: boolean) => {
     const saves = clamp(side.sot - side.goals, 0, 2);
     for (let i = 0; i < saves; i++) {
-      const minute = 5 + Math.floor(Math.random() * 85);
-      const name = isUser ? pickScorer(userSquad).player.name : opponent.name;
-      events.push({ minute, type: 'SAVE', description: `${minute}' — ${rnd(SAVE_TEMPLATES)(name)}`, isUserTeam: isUser, isGoal: false });
+      const minute = 5 + rng.int(85);
+      const name = isUser ? pickScorer(rng, userSquad).player.name : opponent.name;
+      events.push({ minute, type: 'SAVE', description: `${minute}' — ${rng.pick(SAVE_TEMPLATES)(name)}`, isUserTeam: isUser, isGoal: false });
     }
-    if (side.shots - side.sot > 1 && Math.random() < 0.7) {
-      const minute = 5 + Math.floor(Math.random() * 85);
-      const name = isUser ? pickScorer(userSquad).player.name : opponent.name;
-      events.push({ minute, type: 'CHANCE', description: `${minute}' — ${rnd(CHANCE_TEMPLATES)(name)}`, isUserTeam: isUser, isGoal: false });
+    if (side.shots - side.sot > 1 && rng.next() < 0.7) {
+      const minute = 5 + rng.int(85);
+      const name = isUser ? pickScorer(rng, userSquad).player.name : opponent.name;
+      events.push({ minute, type: 'CHANCE', description: `${minute}' — ${rng.pick(CHANCE_TEMPLATES)(name)}`, isUserTeam: isUser, isGoal: false });
     }
   };
   flavour(userSide, true);
   flavour(oppSide, false);
 
   // 0–2 bookings.
-  const cards = Math.floor(Math.random() * 3);
+  const cards = rng.int(3);
   for (let i = 0; i < cards; i++) {
-    const isUser = Math.random() < 0.5;
-    const minute = 10 + Math.floor(Math.random() * 80);
-    const name = isUser ? rnd(userSquad.starters).player.name : opponent.name;
-    events.push({ minute, type: 'YELLOW_CARD', description: `${minute}' — ${rnd(CARD_TEMPLATES)(name)}`, isUserTeam: isUser, isGoal: false });
+    const isUser = rng.next() < 0.5;
+    const minute = 10 + rng.int(80);
+    const name = isUser ? rng.pick(userSquad.starters).player.name : opponent.name;
+    events.push({ minute, type: 'YELLOW_CARD', description: `${minute}' — ${rng.pick(CARD_TEMPLATES)(name)}`, isUserTeam: isUser, isGoal: false });
   }
 
   // Extra time + penalties on a draw.
@@ -291,15 +298,15 @@ export function simulateMatch(
 
   if (userScore === oppScore) {
     wentToET = true;
-    const etUser = simulateSide(u.attack * u.chemMult, userDefResist, possession, home, 91, 120, 0.33);
-    const etOpp = simulateSide(o.attack, oppDefResist, 100 - possession, 0, 91, 120, 0.33);
+    const etUser = simulateSide(rng, u.attack * u.chemMult, userDefResist, possession, home, 91, 120, 0.33);
+    const etOpp = simulateSide(rng, o.attack, oppDefResist, 100 - possession, 0, 91, 120, 0.33);
     addGoals(etUser.goals, etUser.goalMinutes, true);
     addGoals(etOpp.goals, etOpp.goalMinutes, false);
     userScore += etUser.goals;
     oppScore += etOpp.goals;
     if (userScore === oppScore) {
       wentToPenalties = true;
-      const pens = simulatePenalties(u.gk, o.gk);
+      const pens = simulatePenalties(rng, u.gk, o.gk);
       userPenScore = pens.userPens;
       oppPenScore = pens.oppPens;
       userWon = pens.userWon;
@@ -312,7 +319,7 @@ export function simulateMatch(
 
   events.sort((a, b) => a.minute - b.minute);
 
-  const ratings = generateRatings(userSquad.starters, scorerIds, oppScore, possession, userWon);
+  const ratings = generateRatings(rng, userSquad.starters, scorerIds, oppScore, possession, userWon);
   const motm = ratings.reduce((best, r) => (r.rating > best.rating ? r : best));
 
   return {

@@ -5,6 +5,7 @@ import { BENCH_ROLE_POSITIONS } from '@/constants/squadLayout';
 import { isInPosition, isExactPosition } from '@/engine/chemistryEngine';
 import { premiumHandChance } from '@/lib/premiumCards';
 import { isSpecialCard } from '@/lib/cardStyles';
+import type { Rng } from '@/engine/rng';
 
 // ─── Position mapping ─────────────────────────────────────────────────────────
 // Maps a formation slot's positionGroup to acceptable player positions from DB.
@@ -56,6 +57,7 @@ function matchesBenchRole(position: string, role: BenchSubRole): boolean {
 
 /** Try to inject a special card into a draw pool (position-filtered when possible). */
 function trySpecialPick(
+  rng: Rng,
   pool: Player[],
   used: Set<number>,
   slotGroup?: string
@@ -69,7 +71,7 @@ function trySpecialPick(
   }
   if (!specials.length) return null;
   const weights = specials.map((p) => specialWeight(p) * starWeight(p.overall));
-  return weightedSample(specials, weights);
+  return weightedSample(rng, specials, weights);
 }
 
 /** Broad position bucket for reserve diversity (max 2 per bucket, 1 GK). */
@@ -82,14 +84,14 @@ function broadPositionGroup(pos: string): string {
 
 // ─── Weighted sampling ────────────────────────────────────────────────────────
 
-function weightedSample<T>(items: T[], weights: number[]): T {
+function weightedSample<T>(rng: Rng, items: T[], weights: number[]): T {
   const total = weights.reduce((a, b) => a + b, 0);
-  let rand = Math.random() * total;
+  let rand = rng.next() * total;
   for (let i = 0; i < items.length; i++) {
-    rand -= weights[i];
-    if (rand <= 0) return items[i];
+    rand -= weights[i]!;
+    if (rand <= 0) return items[i]!;
   }
-  return items[items.length - 1];
+  return items[items.length - 1]!;
 }
 
 // ─── Contextual affinity ("Markov-style progression vector") ───────────────────
@@ -123,8 +125,6 @@ function matchesAffinity(p: Player, a: Affinity): boolean {
   return a.leagues.has(p.leagueName) || a.nations.has(p.nationalityName);
 }
 
-const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
-
 interface Band {
   lo: number;
   hi: number;
@@ -136,6 +136,7 @@ interface Band {
  * progressively so a card is always returned without duplicates.
  */
 function selectCard(
+  rng: Rng,
   exact: Player[],
   related: Player[],
   any: Player[],
@@ -145,8 +146,8 @@ function selectCard(
   affinityProb: number,
   posExactProb: number
 ): Player | null {
-  const wantAff = (aff.leagues.size > 0 || aff.nations.size > 0) && Math.random() < affinityProb;
-  const usePos = related.length === 0 || Math.random() < posExactProb;
+  const wantAff = (aff.leagues.size > 0 || aff.nations.size > 0) && rng.next() < affinityProb;
+  const usePos = related.length === 0 || rng.next() < posExactProb;
   const primary = usePos ? exact : related;
   const f = (list: Player[], lo: number, hi: number, withAff: boolean) =>
     list.filter(
@@ -158,9 +159,9 @@ function selectCard(
   if (!c.length) c = f(exact, 0, 99, false);
   if (!c.length) c = any.filter((p) => !used.has(p.id));
   if (!c.length) return null;
-  const pick = c[Math.floor(Math.random() * c.length)];
-  used.add(pick.id);
-  return pick;
+  const chosen = rng.pick(c);
+  used.add(chosen.id);
+  return chosen;
 }
 
 /**
@@ -176,6 +177,7 @@ function selectCard(
  * No player already on the pitch/bench/reserves can ever reappear.
  */
 export function drawCardsForSlot(
+  rng: Rng,
   pool: Player[],
   formation: Formation,
   slotIndex: number,
@@ -183,7 +185,7 @@ export function drawCardsForSlot(
   alreadyDrafted: Set<number>,
   premiumDrafted = 0
 ): Player[] {
-  const slotGroup = formation.positions[slotIndex].positionGroup;
+  const slotGroup = formation.positions[slotIndex]!.positionGroup;
   void drafted; // squad context now comes from the global affinity vector below
 
   const avail = pool.filter((p) => !alreadyDrafted.has(p.id));
@@ -199,13 +201,13 @@ export function drawCardsForSlot(
   // Rating bands tuned so elites are a treat (≈20%), gold is the norm (≈55%),
   // and an all-silver pull is rare (floor 79).
   const band = (): Band => {
-    const r = Math.random();
+    const r = rng.next();
     return r < 0.2 ? { lo: 86, hi: 99 } : r < 0.75 ? { lo: 82, hi: 85 } : { lo: 79, hi: 81 };
   };
 
   // One premium slot per hand (~14% base; odds halve for each special already drafted).
   const premiumSlot =
-    Math.random() < premiumHandChance(0.14, premiumDrafted) ? Math.floor(Math.random() * 5) : -1;
+    rng.next() < premiumHandChance(0.14, premiumDrafted) ? rng.int(5) : -1;
 
   const pushPick = (p: Player | null, fromSpecial = false) => {
     if (!p || out.some((x) => x.id === p.id)) return;
@@ -216,27 +218,27 @@ export function drawCardsForSlot(
   // Options 1–3: strict exact-position matches (premium slot may inject a special).
   for (let k = 0; k < 3; k++) {
     if (premiumSlot === k) {
-      const sp = trySpecialPick(avail, used, slotGroup);
+      const sp = trySpecialPick(rng, avail, used, slotGroup);
       if (sp) {
         pushPick(sp, true);
         continue;
       }
     }
-    pushPick(selectCard(exact, related, avail, used, band(), aff, k === 2 ? 0.45 : 0.15, 1));
+    pushPick(selectCard(rng, exact, related, avail, used, band(), aff, k === 2 ? 0.45 : 0.15, 1));
   }
   // Option 4: related-position chemistry bridge.
   if (premiumSlot === 3) {
-    const sp = trySpecialPick(avail, used, slotGroup);
+    const sp = trySpecialPick(rng, avail, used, slotGroup);
     if (sp) pushPick(sp, true);
-    else pushPick(selectCard(exact, related, avail, used, { lo: 79, hi: 84 }, aff, 0.45, 0));
+    else pushPick(selectCard(rng, exact, related, avail, used, { lo: 79, hi: 84 }, aff, 0.45, 0));
   } else {
-    pushPick(selectCard(exact, related, avail, used, { lo: 79, hi: 84 }, aff, 0.45, 0));
+    pushPick(selectCard(rng, exact, related, avail, used, { lo: 79, hi: 84 }, aff, 0.45, 0));
   }
 
   // Option 5: wildcard — uses premium roll if assigned here, else elite base gold.
   let o5: Player | null = null;
   if (premiumSlot === 4) {
-    o5 = trySpecialPick(avail, used, slotGroup);
+    o5 = trySpecialPick(rng, avail, used, slotGroup);
     if (!o5) {
       const legs = avail.filter(
         (p) =>
@@ -244,14 +246,14 @@ export function drawCardsForSlot(
           !used.has(p.id) &&
           (isExactPosition(p.position, slotGroup) || isInPosition(p.position, slotGroup))
       );
-      if (legs.length) o5 = pick(legs);
+      if (legs.length) o5 = rng.pick(legs);
     }
   }
   if (!o5) {
     const elites = (exact.length ? exact : avail).filter((p) => !used.has(p.id) && p.overall >= 85);
     o5 = elites.length
-      ? weightedSample(elites, elites.map((p) => starWeight(p.overall)))
-      : selectCard(exact, related, avail, used, { lo: 84, hi: 99 }, aff, 0.2, 0.8);
+      ? weightedSample(rng, elites, elites.map((p) => starWeight(p.overall)))
+      : selectCard(rng, exact, related, avail, used, { lo: 84, hi: 99 }, aff, 0.2, 0.8);
   }
   if (o5 && !out.some((x) => x.id === o5!.id)) {
     used.add(o5.id);
@@ -264,13 +266,14 @@ export function drawCardsForSlot(
     used.add(f.id);
     out.push(f);
   }
-  return out.sort(() => Math.random() - 0.5).slice(0, 5);
+  return rng.shuffle(out).slice(0, 5);
 }
 
 /**
  * Draw 5 captain candidates — all big-name stars (OVR 86+ preferred).
  */
 export function drawCaptainCandidates(
+  rng: Rng,
   pool: Player[],
   alreadyDrafted: Set<number>,
   premiumDrafted = 0
@@ -290,7 +293,7 @@ export function drawCaptainCandidates(
   const used = new Set<number>();
   let rem = [...eligible];
   while (picks.length < 5 && rem.length > 0) {
-    const choice = weightedSample(rem, rem.map((p) => starWeight(p.overall)));
+    const choice = weightedSample(rng, rem, rem.map((p) => starWeight(p.overall)));
     if (!used.has(choice.id)) {
       picks.push(choice);
       used.add(choice.id);
@@ -300,13 +303,13 @@ export function drawCaptainCandidates(
 
   // Chance to guarantee at least one special captain option (tapers if squad has specials).
   if (
-    Math.random() < premiumHandChance(0.35, premiumDrafted) &&
+    rng.next() < premiumHandChance(0.35, premiumDrafted) &&
     !picks.some((p) => isSpecialCard(p))
   ) {
     const sp = eligible.filter((p) => isSpecialCard(p) && !used.has(p.id));
     if (sp.length) {
-      const choice = weightedSample(sp, sp.map((p) => specialWeight(p) * starWeight(p.overall)));
-      picks[Math.floor(Math.random() * picks.length)] = choice;
+      const choice = weightedSample(rng, sp, sp.map((p) => specialWeight(p) * starWeight(p.overall)));
+      picks[rng.int(picks.length)] = choice;
     }
   }
   return picks;
@@ -317,6 +320,7 @@ export function drawCaptainCandidates(
  * rest are solid gold utilities (80–84), with a moderate affinity bias.
  */
 export function drawSubCandidates(
+  rng: Rng,
   pool: Player[],
   benchRole: BenchSubRole,
   alreadyDrafted: Set<number>,
@@ -330,12 +334,12 @@ export function drawSubCandidates(
   const used = new Set<number>();
   const out: Player[] = [];
   const subPremium =
-    Math.random() < premiumHandChance(0.08, premiumDrafted) ? Math.floor(Math.random() * 5) : -1;
+    rng.next() < premiumHandChance(0.08, premiumDrafted) ? rng.int(5) : -1;
   for (let k = 0; k < 5; k++) {
-    const band: Band = k === 0 ? (Math.random() < 0.5 ? { lo: 86, hi: 99 } : { lo: 82, hi: 85 }) : { lo: 80, hi: 84 };
+    const band: Band = k === 0 ? (rng.next() < 0.5 ? { lo: 86, hi: 99 } : { lo: 82, hi: 85 }) : { lo: 80, hi: 84 };
     let p: Player | null = null;
-    if (k === subPremium) p = trySpecialPick(avail, used);
-    if (!p) p = selectCard(exact, related, avail, used, band, aff, 0.4, 0.8);
+    if (k === subPremium) p = trySpecialPick(rng, avail, used);
+    if (!p) p = selectCard(rng, exact, related, avail, used, band, aff, 0.4, 0.8);
     if (p) out.push(p);
   }
   while (out.length < 5) {
@@ -344,7 +348,7 @@ export function drawSubCandidates(
     used.add(f.id);
     out.push(f);
   }
-  return out.sort(() => Math.random() - 0.5).slice(0, 5);
+  return rng.shuffle(out).slice(0, 5);
 }
 
 /**
@@ -353,6 +357,7 @@ export function drawSubCandidates(
  * pull is rare; the occasional Legend can show up as a late chemistry-saver.
  */
 export function drawReserveWildcard(
+  rng: Rng,
   pool: Player[],
   alreadyDrafted: Set<number>,
   premiumDrafted = 0
@@ -376,7 +381,7 @@ export function drawReserveWildcard(
   };
 
   const band = (): Band => {
-    const r = Math.random();
+    const r = rng.next();
     return r < 0.1 ? { lo: 86, hi: 99 } : r < 0.68 ? { lo: 80, hi: 85 } : { lo: 75, hi: 79 };
   };
 
@@ -389,6 +394,7 @@ export function drawReserveWildcard(
     if (!c.length) c = avail.filter((x) => !used.has(x.id));
     if (!c.length) return null;
     return weightedSample(
+      rng,
       c,
       c.map((p) => starWeight(p.overall))
     );
@@ -396,12 +402,12 @@ export function drawReserveWildcard(
 
   // At most one premium card per reserve hand (~8% base, tapers with drafted specials).
   const premiumSlot =
-    Math.random() < premiumHandChance(0.08, premiumDrafted) ? Math.floor(Math.random() * 5) : -1;
+    rng.next() < premiumHandChance(0.08, premiumDrafted) ? rng.int(5) : -1;
 
   for (let k = 0; k < 5; k++) {
     let p: Player | null = null;
     if (k === premiumSlot) {
-      p = trySpecialPick(avail, used);
+      p = trySpecialPick(rng, avail, used);
       if (p && !canPick(p)) p = null;
     }
     if (!p) p = pickWeightedBase();
@@ -418,7 +424,7 @@ export function drawReserveWildcard(
     used.add(f.id);
     out.push(f);
   }
-  return out.sort(() => Math.random() - 0.5).slice(0, 5);
+  return rng.shuffle(out).slice(0, 5);
 }
 
 /**
@@ -426,22 +432,18 @@ export function drawReserveWildcard(
  * a base name (e.g. five 4-3-3 variants); we pick 5 different names and a random
  * variant of each, so the picker always shows variety.
  */
-export function sampleFormations(formations: Formation[]): Formation[] {
+export function sampleFormations(rng: Rng, formations: Formation[]): Formation[] {
   const byName: Record<string, Formation[]> = {};
   for (const f of formations) (byName[f.name] ??= []).push(f);
-  const names = Object.keys(byName).sort(() => Math.random() - 0.5).slice(0, 5);
-  return names.map((n) => {
-    const variants = byName[n];
-    return variants[Math.floor(Math.random() * variants.length)];
-  });
+  const names = rng.shuffle(Object.keys(byName)).slice(0, 5);
+  return names.map((n) => rng.pick(byName[n]!));
 }
 
 /**
  * Draw 5 random manager candidates for the manager pick step.
  */
-export function drawManagers(): Manager[] {
-  const shuffled = [...MANAGERS].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, 5);
+export function drawManagers(rng: Rng): Manager[] {
+  return rng.shuffle(MANAGERS).slice(0, 5);
 }
 
 /**

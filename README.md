@@ -4,6 +4,8 @@ A free, nostalgic FIFA 16 FUT Draft experience with today's players, clubs, and 
 
 **No coins. No paywalls. Just draft.**
 
+Product decisions are locked in [`docs/00-DECISIONS.md`](docs/00-DECISIONS.md). Session progress is appended to [`docs/PROGRESS.md`](docs/PROGRESS.md). Current status lives in [`docs/STATE.md`](docs/STATE.md).
+
 ## Features
 
 - **Formation pick** — 5 random formations from 8 real layouts (FIFA 16 style)
@@ -27,8 +29,8 @@ A free, nostalgic FIFA 16 FUT Draft experience with today's players, clubs, and 
 ## Getting Started
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
@@ -39,17 +41,27 @@ To regenerate from CSV:
 
 ```bash
 # Place any *.csv in data/ (e.g. data/FC26_20250921.csv)
-npm run generate
+pnpm generate
 ```
+
+---
+
+## Verify
+
+```bash
+pnpm verify   # typecheck + vitest + next build
+```
+
+CI runs the same script on push and PR via `.github/workflows/verify.yml`.
 
 ---
 
 ## Deploy to Vercel
 
-1. Push to GitHub
-2. Import repo at [vercel.com](https://vercel.com) — Next.js auto-detected
-3. Build command: `npm run build` (default)
-4. **Optional — global leaderboard:** Install [Upstash Redis](https://vercel.com/marketplace/upstash) from Vercel Marketplace. Env vars `KV_REST_API_URL` and `KV_REST_API_TOKEN` are auto-set.
+1. Push to GitHub (`main`)
+2. Import repo at [vercel.com](https://vercel.com) — Next.js auto-detected; prefer Git integration over CLI deploys
+3. Build command: `pnpm build` (or default)
+4. **Optional — global leaderboard:** Install [Upstash Redis](https://vercel.com/marketplace/upstash) from Vercel Marketplace. Env vars `KV_REST_API_URL` and `KV_REST_API_TOKEN` are auto-set. Confirm they exist on Preview and Production.
 5. Deploy
 
 Without KV, the game works fully — leaderboard saves locally in the browser.
@@ -59,10 +71,10 @@ Without KV, the game works fully — leaderboard saves locally in the browser.
 ## Tests
 
 ```bash
-npm run test:run
+pnpm test:run
 ```
 
-37 unit tests cover chemistry, bracket, player draws, and match simulation engines.
+Unit tests cover chemistry, bracket, player draws, match simulation, and seeded RNG.
 
 ---
 

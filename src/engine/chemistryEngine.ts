@@ -29,36 +29,44 @@ function buildAdjacency(formation: Formation): number[][] {
   const n = positions.length;
   const adj: number[][] = Array.from({ length: n }, () => []);
   const link = (a: number, b: number) => {
-    if (a !== b && !adj[a].includes(b)) {
-      adj[a].push(b);
-      adj[b].push(a);
+    const la = adj[a];
+    const lb = adj[b];
+    if (a !== b && la && lb && !la.includes(b)) {
+      la.push(b);
+      lb.push(a);
     }
   };
 
   // 1. Cluster indices into lines by y (positions within 9 units share a line).
   const order = Array.from({ length: n }, (_, i) => i).sort(
-    (a, b) => positions[a].y - positions[b].y
+    (a, b) => positions[a]!.y - positions[b]!.y
   );
   const lines: number[][] = [];
   for (const i of order) {
     const last = lines[lines.length - 1];
-    if (last && Math.abs(positions[i].y - positions[last[0]].y) <= 9) {
+    const pos = positions[i];
+    if (last && pos && Math.abs(pos.y - positions[last[0]!]!.y) <= 9) {
       last.push(i);
     } else {
       lines.push([i]);
     }
   }
   // Sort each line left → right.
-  for (const line of lines) line.sort((a, b) => positions[a].x - positions[b].x);
+  for (const line of lines) line.sort((a, b) => positions[a]!.x - positions[b]!.x);
 
   // 2. Horizontal links within each line.
   for (const line of lines) {
-    for (let k = 0; k < line.length - 1; k++) link(line[k], line[k + 1]);
+    for (let k = 0; k < line.length - 1; k++) {
+      const left = line[k];
+      const right = line[k + 1];
+      if (left === undefined || right === undefined) continue;
+      link(left, right);
+    }
   }
 
   const euclid = (i: number, j: number) => {
-    const dx = positions[i].x - positions[j].x;
-    const dy = positions[i].y - positions[j].y;
+    const dx = positions[i]!.x - positions[j]!.x;
+    const dy = positions[i]!.y - positions[j]!.y;
     return Math.sqrt(dx * dx + dy * dy);
   };
 
@@ -69,10 +77,11 @@ function buildAdjacency(formation: Formation): number[][] {
   for (let L = 0; L < lines.length - 1; L++) {
     const A = lines[L];
     const B = lines[L + 1];
-    const isGkLine = A.length === 1 && positions[A[0]].positionGroup === 'GK';
+    if (!A || !B) continue;
+    const isGkLine = A.length === 1 && positions[A[0]!]!.positionGroup === 'GK';
     if (isGkLine) {
       // GK bonds only with the closest one or two defenders.
-      const gk = A[0];
+      const gk = A[0]!;
       [...B]
         .sort((a, b) => euclid(gk, a) - euclid(gk, b))
         .slice(0, Math.min(2, B.length))
@@ -82,7 +91,7 @@ function buildAdjacency(formation: Formation): number[][] {
     let made = 0;
     for (const a of A) {
       for (const b of B) {
-        if (Math.abs(positions[a].x - positions[b].x) <= TOL) {
+        if (Math.abs(positions[a]!.x - positions[b]!.x) <= TOL) {
           link(a, b);
           made++;
         }
@@ -90,8 +99,8 @@ function buildAdjacency(formation: Formation): number[][] {
     }
     // Guarantee the two lines are connected even if nothing aligned.
     if (made === 0) {
-      let pa = A[0];
-      let pb = B[0];
+      let pa = A[0]!;
+      let pb = B[0]!;
       let bd = Infinity;
       for (const a of A)
         for (const b of B) {
@@ -110,15 +119,16 @@ function buildAdjacency(formation: Formation): number[][] {
   //    nearest outfield neighbour — this is how a LB picks up the LM ahead of
   //    it without everyone funnelling through the central pivot.
   for (let i = 0; i < n; i++) {
-    if (positions[i].positionGroup === 'GK') continue;
-    if (adj[i].length >= 2) continue;
+    const row = adj[i];
+    if (!row || positions[i]!.positionGroup === 'GK') continue;
+    if (row.length >= 2) continue;
     const candidates = Array.from({ length: n }, (_, j) => j)
       .filter(
-        (j) => j !== i && j !== undefined && positions[j].positionGroup !== 'GK' && !adj[i].includes(j)
+        (j) => j !== i && positions[j]!.positionGroup !== 'GK' && !row.includes(j)
       )
       .sort((a, b) => euclid(i, a) - euclid(i, b));
     for (const j of candidates) {
-      if (adj[i].length >= 2) break;
+      if (row.length >= 2) break;
       link(i, j);
     }
   }
@@ -142,8 +152,11 @@ function adjacencyFromLinks(formation: Formation): number[][] {
     for (const t of targets) {
       const j = idx[t];
       if (j == null || j === i) continue;
-      if (!adj[i].includes(j)) adj[i].push(j);
-      if (!adj[j].includes(i)) adj[j].push(i); // links are undirected
+      const ai: number[] | undefined = adj[i];
+      const aj: number[] | undefined = adj[j];
+      if (!ai || !aj) continue;
+      if (!ai.includes(j)) ai.push(j);
+      if (!aj.includes(i)) aj.push(i); // links are undirected
     }
   }
   return adj;
@@ -160,7 +173,7 @@ export function getAdjacency(formation: Formation): number[][] {
         ? adjacencyFromLinks(formation)
         : buildAdjacency(formation);
   }
-  return adjacencyCache[key];
+  return adjacencyCache[key]!;
 }
 
 // ─── Position grouping (for in-position chemistry) ─────────────────────────────
@@ -371,12 +384,13 @@ export function calculateChemistry(
     if (!player) continue;
 
     const slot = formation.positions[i];
+    if (!slot) continue;
 
     // Net Link Balance: sum link intensities to active neighbours (green/hyper
     // links cancel dead red links). Links to empty slots count as 0 (neutral),
     // so early picks aren't penalised before their neighbours are drafted.
     let net = 0;
-    for (const j of adj[i]) {
+    for (const j of adj[i] ?? []) {
       const neighbor = bySlot[j];
       if (!neighbor) continue;
       net += linkIntensity(player.player, neighbor.player);

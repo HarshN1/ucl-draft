@@ -1,3 +1,56 @@
 {
-  "extends": ["next/core-web-vitals", "next/typescript"]
+  "extends": ["next/core-web-vitals", "next/typescript"],
+  "rules": {
+    "no-restricted-properties": [
+      "error",
+      {
+        "object": "Math",
+        "property": "random",
+        "message": "Use src/engine/rng.ts (Rng / freshSeed). Math.random is banned outside that file."
+      }
+    ],
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "Literal[value=/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/]",
+        "message": "Hardcoded hex colours belong in src/app/globals.css tokens."
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["src/engine/rng.ts"],
+      "rules": {
+        "no-restricted-properties": "off"
+      }
+    },
+    {
+      "files": ["src/app/globals.css"],
+      "rules": {
+        "no-restricted-syntax": "off"
+      }
+    },
+    {
+      "files": [
+        "src/screens/**",
+        "src/components/**",
+        "src/app/**",
+        "src/lib/cardStyles.ts"
+      ],
+      "rules": {
+        "no-restricted-syntax": "off"
+      }
+    },
+    {
+      "files": [
+        "src/screens/TrophyScreen.tsx",
+        "src/hooks/useLeaderboard.ts",
+        "src/lib/leaderboardStore.ts",
+        "src/engine/__tests__/**"
+      ],
+      "rules": {
+        "no-restricted-properties": "off"
+      }
+    }
+  ]
 }

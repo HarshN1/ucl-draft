@@ -294,7 +294,7 @@ export function SquadBoard({
   for (const l of chem.links) litMap.set(`${l.from}-${l.to}`, l.quality);
   const allLinks: Array<[number, number, string | null]> = [];
   for (let i = 0; i < adj.length; i++) {
-    for (const j of adj[i]) {
+    for (const j of adj[i] ?? []) {
       if (i < j) allLinks.push([i, j, litMap.get(`${i}-${j}`) ?? null]);
     }
   }

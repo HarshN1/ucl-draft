@@ -92,6 +92,12 @@ export default function Home() {
           onStart={handleStart}
           isLoading={draft.isLoadingPool}
           error={draft.poolError}
+          hasResume={draft.hasResume}
+          onResume={() => {
+            initAudio();
+            void draft.resume();
+          }}
+          onDiscardResume={draft.discardResume}
         />
       );
 
@@ -219,6 +225,8 @@ export default function Home() {
           roundIndex={draft.currentRound}
           roundName={roundName}
           isFinalRound={isFinalRound}
+          matchResult={draft.matchResult}
+          onSimulate={draft.simulateMatch}
           onMatchComplete={draft.setMatchResult}
           onContinue={draft.confirmPostMatch}
           playGoalSound={playGoal}

@@ -93,7 +93,10 @@ export const LEGENDS: Player[] = RAW.map((r, i) => ({
   leagueName: 'FUT_LEGENDS',
   nationalityId: 0,
   nationalityName: r.nationality,
-  imageUrl: LEGEND_SOFIFA_IDS[r.name] ? sofifaFaceUrl(LEGEND_SOFIFA_IDS[r.name]) : '',
+  imageUrl: (() => {
+    const sofifaId = LEGEND_SOFIFA_IDS[r.name];
+    return sofifaId ? sofifaFaceUrl(sofifaId) : '';
+  })(),
   flagUrl: flagUrl(r.nationality),
   isLegend: true,
 }));

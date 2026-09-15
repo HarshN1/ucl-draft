@@ -9,10 +9,7 @@ const BY_EXACT: Record<string, string> = displayMaps.byExact;
 
 export function displayName(player: Pick<Player, 'id' | 'name' | 'basePlayerId'>): string {
   const id = player.basePlayerId ?? player.id;
-  if (BY_ID[id]) return BY_ID[id];
-  if (BY_ID[player.id]) return BY_ID[player.id];
-  if (BY_EXACT[player.name]) return BY_EXACT[player.name];
-  return player.name;
+  return BY_ID[id] ?? BY_ID[player.id] ?? BY_EXACT[player.name] ?? player.name;
 }
 
 export function withDisplayName(player: Player): Player {

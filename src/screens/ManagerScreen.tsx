@@ -50,8 +50,8 @@ function countBoost(manager: Manager, starters: Player[]): number {
     const sameNation =
       p.nationalityName.toLowerCase() === manager.nationalityName.toLowerCase();
     const sameLeague =
-      normLeague(p.leagueName).includes(normLeague(manager.leagueName).split(' ')[0]) ||
-      normLeague(manager.leagueName).includes(normLeague(p.leagueName).split(' ')[0]);
+      normLeague(p.leagueName).includes(normLeague(manager.leagueName).split(' ')[0] ?? '') ||
+      normLeague(manager.leagueName).includes(normLeague(p.leagueName).split(' ')[0] ?? '');
     if (sameNation || sameLeague) n++;
   }
   return n;
