@@ -103,6 +103,16 @@ describe('getAdjacency', () => {
     const lcbIdx = FORMATION_433.positions.findIndex((p) => p.slot === 'LCB');
     expect(adj[gkIdx]).toContain(lcbIdx);
   });
+
+  it('omits removed FUT16 side-CM to side-CB links in 4-3-3', () => {
+    const adj = getAdjacency(FORMATION_433);
+    const lcmIdx = FORMATION_433.positions.findIndex((p) => p.slot === 'LCM');
+    const lcbIdx = FORMATION_433.positions.findIndex((p) => p.slot === 'LCB');
+    const rcmIdx = FORMATION_433.positions.findIndex((p) => p.slot === 'RCM');
+    const rcbIdx = FORMATION_433.positions.findIndex((p) => p.slot === 'RCB');
+    expect(adj[lcmIdx]).not.toContain(lcbIdx);
+    expect(adj[rcmIdx]).not.toContain(rcbIdx);
+  });
 });
 
 describe('calculateChemistry', () => {

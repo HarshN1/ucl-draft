@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { clsx } from 'clsx';
 import type { Formation, FormationPosition } from '@/types';
 import { Button } from '@/components/ui/Button';
@@ -55,6 +56,7 @@ function PitchDiagram({ positions, big = false }: { positions: FormationPosition
 }
 
 export function FormationPicker({ formations, onSelect }: FormationPickerProps) {
+  const isMobile = useIsMobile();
   const [focusName, setFocusName] = useState<string>(formations[0]?.name ?? '');
   const [selected, setSelected] = useState<string | null>(null);
   const focused = formations.find((f) => f.name === focusName) ?? formations[0];
@@ -65,16 +67,16 @@ export function FormationPicker({ formations, onSelect }: FormationPickerProps) 
   }
 
   return (
-    <div className="flex gap-5 w-full max-w-4xl mx-auto items-stretch flex-wrap md:flex-nowrap justify-center">
-      {/* Left: scrollable list */}
-      <div className="w-full md:w-64 flex md:flex-col gap-2 overflow-x-auto md:overflow-y-auto md:max-h-[62cqh] shrink-0">
+    <div className="flex flex-col md:flex-row gap-3 md:gap-5 w-full max-w-4xl mx-auto items-stretch justify-center">
+      {/* Formation list */}
+      <div className="w-full md:w-64 flex flex-col gap-2 overflow-y-auto max-h-[42vh] md:max-h-[62cqh] shrink-0">
         {formations.map((f) => {
           const isFocus = focusName === f.name;
           return (
             <button
               key={f.name}
               onMouseEnter={() => setFocusName(f.name)}
-              onClick={() => (isFocus ? confirm(f) : setFocusName(f.name))}
+              onClick={() => (isMobile || isFocus ? confirm(f) : setFocusName(f.name))}
               className={clsx(
                 'ea-skew flex items-center gap-3 border-2 px-3 py-2 transition-[background-color,border-color] duration-75 ease-out shrink-0 text-left',
                 isFocus
@@ -103,8 +105,8 @@ export function FormationPicker({ formations, onSelect }: FormationPickerProps) 
         })}
       </div>
 
-      {/* Right: big preview */}
-      <div className="flex-1 min-w-[260px] flex flex-col items-center">
+      {/* Preview — hidden on phone (list is enough) */}
+      <div className="hidden md:flex flex-1 min-w-[260px] flex-col items-center">
         <div className="w-full flex items-baseline gap-2 mb-2">
           <span className="font-display text-white/40 text-xs uppercase tracking-widest">Formation:</span>
           <span className="font-display font-bold text-accent text-2xl">{focused?.name}</span>

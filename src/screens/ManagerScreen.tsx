@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { clsx } from 'clsx';
 import type { Manager, Player } from '@/types';
+import { DraftSideAction } from '@/components/draft/DraftSideAction';
 import nationFlags from '@/data/nationFlags.json';
 import { proxied } from '@/lib/img';
 
@@ -12,6 +13,7 @@ interface ManagerScreenProps {
   managers: Manager[];
   starters: Player[];
   onPick: (manager: Manager) => void;
+  onQuickSimToReview?: () => void;
 }
 
 function ManagerAvatar({ manager }: { manager: Manager }) {
@@ -55,7 +57,7 @@ function countBoost(manager: Manager, starters: Player[]): number {
   return n;
 }
 
-export function ManagerScreen({ managers, starters, onPick }: ManagerScreenProps) {
+export function ManagerScreen({ managers, starters, onPick, onQuickSimToReview }: ManagerScreenProps) {
   const [picked, setPicked] = useState<string | null>(null);
 
   function handlePick(m: Manager) {
@@ -65,7 +67,10 @@ export function ManagerScreen({ managers, starters, onPick }: ManagerScreenProps
   }
 
   return (
-    <div className="h-full overflow-y-auto flex flex-col items-center justify-center px-4 py-8">
+    <div className="h-full overflow-hidden flex flex-col items-center justify-center px-4 py-4 relative">
+      {onQuickSimToReview && (
+        <DraftSideAction label="Quick Sim" onClick={onQuickSimToReview} />
+      )}
       <div className="text-center mb-10">
         <div className="font-display text-white/30 text-xs uppercase tracking-widest mb-1">
           Final Step · Squad Building

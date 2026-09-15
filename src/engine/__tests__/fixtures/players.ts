@@ -7,8 +7,6 @@ export function makePlayer(overrides: Partial<Player> & Pick<Player, 'position' 
   return {
     id,
     name: overrides.name ?? `Player ${id}`,
-    overall: overrides.overall,
-    position: overrides.position,
     pac: overrides.pac ?? 80,
     sho: overrides.sho ?? 80,
     pas: overrides.pas ?? 80,
@@ -22,6 +20,9 @@ export function makePlayer(overrides: Partial<Player> & Pick<Player, 'position' 
     nationalityName: overrides.nationalityName ?? 'England',
     imageUrl: overrides.imageUrl ?? '',
     ...overrides,
+    // Required fields last so Partial overrides cannot drop them
+    overall: overrides.overall,
+    position: overrides.position,
   };
 }
 

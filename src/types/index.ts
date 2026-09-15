@@ -1,5 +1,14 @@
 // ─── Core Player ────────────────────────────────────────────────────────────
 
+export type CardType =
+  | 'totw'
+  | 'hero'
+  | 'icon'
+  | 'cornerstones'
+  | 'thunderstruck'
+  | 'thunderstruck_icon'
+  | 'promo';
+
 export interface Player {
   id: number;
   name: string;
@@ -20,6 +29,14 @@ export interface Player {
   badgeUrl?: string;  // baked sofifa club badge URL
   flagUrl?: string;   // baked sofifa nation flag URL
   isLegend?: boolean; // FUT Legend / Icon (special chemistry + card art)
+  /** EA FC special card variant (TOTW, Hero, promo, etc.) */
+  cardType?: CardType;
+  cardVersion?: string;
+  promoLabel?: string;
+  rareType?: number;
+  resourceId?: number;
+  basePlayerId?: number;
+  cardFrameUrl?: string;
 }
 
 // ─── Manager ──────────────────────────────────────────────────────────────────
@@ -164,6 +181,26 @@ export interface MatchResult {
   userWon: boolean;
 }
 
+// ─── Squad snapshot (share + leaderboard) ────────────────────────────────────
+
+export interface SquadSnapshotSlot {
+  slot: string;
+  slotIndex: number;
+  player: Player;
+}
+
+export interface SquadSnapshot {
+  formationName: string;
+  teamName: string;
+  ovrAvg: number;
+  chemistry: number;
+  draftScore: number;
+  manager: { id: string; name: string; nationalityName: string } | null;
+  starters: SquadSnapshotSlot[];
+  subs: SquadSnapshotSlot[];
+  reserves: SquadSnapshotSlot[];
+}
+
 // ─── Leaderboard ─────────────────────────────────────────────────────────────
 
 export interface LeaderboardEntry {
@@ -173,6 +210,8 @@ export interface LeaderboardEntry {
   draftScore: number;
   result: string;         // e.g. "Champions", "Semi-Final", "Eliminated R16"
   timestamp: number;
+  squad?: SquadSnapshot;
+  shareUrl?: string;
 }
 
 // ─── Game State Machine ──────────────────────────────────────────────────────
@@ -182,6 +221,7 @@ export enum GameState {
   FORMATION_PICK = 'FORMATION_PICK',
   DRAFT = 'DRAFT',          // 11 starters + bench
   MANAGER_PICK = 'MANAGER_PICK',
+  SQUAD_REVIEW = 'SQUAD_REVIEW', // rearrange after manager before locking in
   DRAFT_SCORE = 'DRAFT_SCORE',
   BRACKET_VIEW = 'BRACKET_VIEW',
   MATCH_SIM = 'MATCH_SIM',

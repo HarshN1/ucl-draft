@@ -1,7 +1,15 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://ucl-draft.vercel.app';
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#07131c',
+};
+
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://ucl-draft-lemon.vercel.app';
 
 export const metadata: Metadata = {
   title: 'FUT Draft — Chase 194',

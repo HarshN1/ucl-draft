@@ -1,9 +1,13 @@
 'use client';
 
-import { GameState } from '@/types';
+import { useEffect, useState } from 'react';
+import { GameState, type SquadSnapshot } from '@/types';
 import { useDraft } from '@/hooks/useDraft';
 import { useSound } from '@/hooks/useSound';
 import { findUserMatch } from '@/engine/bracketEngine';
+import { decodeSquadParam, snapshotToSquad } from '@/lib/squadShare';
+import { SquadViewer } from '@/components/draft/SquadViewer';
+import { SoundToggle } from '@/components/ui/SoundToggle';
 
 import { LandingScreen } from '@/screens/LandingScreen';
 import { FormationScreen } from '@/screens/FormationScreen';
@@ -17,6 +21,20 @@ import { TrophyScreen } from '@/screens/TrophyScreen';
 export default function Home() {
   const draft = useDraft();
   const { initAudio, playGoal, playClick, playPick } = useSound();
+  const [sharedDismissed, setSharedDismissed] = useState(false);
+  const [sharedSnapshot, setSharedSnapshot] = useState<SquadSnapshot | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const param = params.get('s') ?? params.get('draft');
+    if (param) {
+      setSharedSnapshot(decodeSquadParam(param));
+      setSharedDismissed(false);
+    }
+  }, []);
+
+  const sharedSquad =
+    !sharedDismissed && sharedSnapshot ? snapshotToSquad(sharedSnapshot) : null;
 
   function handleStart() {
     initAudio();
@@ -39,22 +57,30 @@ export default function Home() {
   const roundName = draft.bracket?.[draft.currentRound]?.name ?? '';
   const isFinalRound = draft.currentRound === 3;
 
+  if (sharedSquad && sharedSnapshot) {
+    return (
+      <div className="game-shell stadium-mesh fixed inset-0 overflow-hidden select-none flex items-center justify-center">
+        <SoundToggle className="fixed top-3 right-3" />
+        <div className="game-stage relative">
+          <SquadViewer
+            squad={sharedSquad}
+            shareUrl={typeof window !== 'undefined' ? window.location.href : undefined}
+            onClose={() => {
+              setSharedDismissed(true);
+              window.history.replaceState({}, '', '/');
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   const screen = renderScreen();
 
-  // Fixed 16:9 "console stage" — isolates the game from browser window size so
-  // it always frames like a video game rather than a responsive web page.
   return (
-    <div className="stadium-mesh fixed inset-0 overflow-hidden select-none flex items-center justify-center">
-      <div
-        className="relative overflow-hidden"
-        style={{
-          width: 'min(100vw, 177.78vh)',
-          height: 'min(56.25vw, 100vh)',
-          containerType: 'size',
-        }}
-      >
-        {screen}
-      </div>
+    <div className="game-shell stadium-mesh fixed inset-0 overflow-hidden select-none flex items-center justify-center">
+      <SoundToggle className="fixed top-3 right-3" />
+      <div className="game-stage relative">{screen}</div>
     </div>
   );
 
@@ -103,6 +129,9 @@ export default function Home() {
           onSelectSlot={draft.selectSlot}
           onPickPlayer={draft.pickPlayer}
           onSwapSlots={draft.swapSlots}
+          onConfirmSquad={draft.confirmSquad}
+          allFilled={draft.allFilled}
+          onQuickSimToReview={draft.quickSimToReview}
           onPlayClick={playClick}
           onPlayPick={playPick}
         />
@@ -118,8 +147,45 @@ export default function Home() {
             playPick();
             draft.pickManager(m);
           }}
+          onQuickSimToReview={() => {
+            playClick();
+            draft.quickSimToReview();
+          }}
         />
       );
+
+    case GameState.SQUAD_REVIEW: {
+      if (!draft.formation) return null;
+      return (
+        <DraftScreen
+          formation={draft.formation}
+          awaitingCaptain={false}
+          starterPlayers={draft.starterPlayers}
+          benchPlayers={draft.benchPlayers}
+          benchGroups={draft.benchGroups}
+          subsCount={draft.subsCount}
+          activeSlot={null}
+          currentCards={[]}
+          chemPreview={draft.chemPreview}
+          squadRating={draft.squadRating}
+          filledCount={23}
+          getChemPreviewForCandidate={draft.getChemPreviewForCandidate}
+          onPickCaptain={draft.pickCaptain}
+          onSelectSlot={draft.selectSlot}
+          onPickPlayer={draft.pickPlayer}
+          onSwapSlots={draft.swapSlots}
+          reviewMode
+          managerName={draft.manager?.name}
+          shareSquad={draft.previewSquad}
+          onFinishReview={draft.finishSquadReview}
+          onQuickSimToReview={() => {
+            playClick();
+            draft.quickSimToReview();
+          }}
+          onPlayClick={playClick}
+        />
+      );
+    }
 
     case GameState.DRAFT_SCORE:
       if (!draft.squad) return null;
@@ -139,6 +205,7 @@ export default function Home() {
           currentMatchIndex={draft.currentMatchIndex}
           onPlayMatch={draft.startMatch}
           teamName={draft.teamName}
+          draftScore={draft.squad?.draftScore}
         />
       );
 

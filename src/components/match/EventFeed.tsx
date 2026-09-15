@@ -53,12 +53,12 @@ export function EventFeed({ events, onAllEventsShown, onGoalEvent }: EventFeedPr
   const visibleEvents = events.slice(0, visibleCount);
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-1.5 h-full overflow-hidden">
       {visibleEvents.map((event, idx) => (
         <div
           key={idx}
           className={clsx(
-            'flex items-start gap-3 px-3 py-2 rounded-lg text-sm animate-fade-in',
+            'flex items-start gap-2 px-2 py-1.5 rounded-lg text-xs animate-fade-in',
             event.isGoal
               ? 'bg-accent/10 border border-accent/30 animate-goal-flash'
               : 'bg-white/5'

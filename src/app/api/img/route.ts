@@ -8,10 +8,10 @@ import { NextRequest, NextResponse } from 'next/server';
  * fetches them server-side (where they're reachable) and streams them back from our
  * own origin, with long-lived caching.
  *
- * Locked to cdn.sofifa.net to avoid being an open proxy (SSRF protection).
+ * Locked to sofifa + Futbin CDNs to avoid being an open proxy (SSRF protection).
  */
 
-const ALLOWED_HOST = 'cdn.sofifa.net';
+const ALLOWED_HOSTS = new Set(['cdn.sofifa.net', 'cdn3.futbin.com']);
 
 export async function GET(req: NextRequest) {
   const u = req.nextUrl.searchParams.get('u');
@@ -24,13 +24,16 @@ export async function GET(req: NextRequest) {
     return new NextResponse('Bad url', { status: 400 });
   }
 
-  if (target.hostname !== ALLOWED_HOST) {
+  if (!ALLOWED_HOSTS.has(target.hostname)) {
     return new NextResponse('Forbidden host', { status: 403 });
   }
 
+  const referer =
+    target.hostname === 'cdn3.futbin.com' ? 'https://www.futbin.com/' : 'https://sofifa.com/';
+
   try {
     const upstream = await fetch(target.toString(), {
-      headers: { Referer: 'https://sofifa.com/', 'User-Agent': 'Mozilla/5.0' },
+      headers: { Referer: referer, 'User-Agent': 'Mozilla/5.0' },
       // Cache upstream fetches on the server
       next: { revalidate: 60 * 60 * 24 * 7 },
     });

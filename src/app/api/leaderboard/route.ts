@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Ratelimit } from '@upstash/ratelimit';
 import { isKvConfigured, getRedis } from '@/lib/kv';
 import { addEntry, getTop, validateEntry } from '@/lib/leaderboardStore';
+import type { LeaderboardEntry, SquadSnapshot } from '@/types';
 
 const LOCAL_MODE_HEADER = 'X-Leaderboard-Mode';
 
@@ -81,12 +82,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const entry = {
+  const entry: Omit<LeaderboardEntry, 'id'> = {
     teamName: String(body.teamName ?? ''),
     formation: String(body.formation ?? ''),
     draftScore: Number(body.draftScore),
     result: String(body.result ?? ''),
     timestamp: Date.now(),
+    squad: body.squad as SquadSnapshot | undefined,
+    shareUrl: body.shareUrl ? String(body.shareUrl) : undefined,
   };
 
   const validationError = validateEntry(entry);

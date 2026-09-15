@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { clsx } from 'clsx';
 import type { Formation, Player, ChemistryPreview } from '@/types';
 import type { ActiveSlot } from '@/hooks/useDraft';
@@ -8,21 +9,23 @@ import { getAdjacency, positionCategory } from '@/engine/chemistryEngine';
 
 type PositionFit = 'perfect' | 'related' | 'outOfRole' | 'wrong';
 
-// Shield silhouette shared with PlayerCard (empty skeletons match real cards).
 const SHIELD =
   'polygon(3% 8%, 9% 2%, 22% 0.6%, 40% 1.8%, 50% 3%, 60% 1.8%, 78% 0.6%, 91% 2%, 97% 8%, 98% 56%, 96% 76%, 86% 90%, 68% 98.5%, 50% 100%, 32% 98.5%, 14% 90%, 4% 76%, 2% 56%)';
 const UNLIT_LINE = 'var(--chem-unlit)';
+
+const BENCH_PEEK_H = 28;
 
 interface SquadBoardProps {
   formation: Formation;
   starterPlayers: (Player | null)[];
   benchPlayers: (Player | null)[];
-  benchGroups: string[];
   subsCount: number;
   chem: ChemistryPreview;
   activeSlot: ActiveSlot | null;
   draggingSlot: ActiveSlot | null;
   swapSource: ActiveSlot | null;
+  compact?: boolean;
+  readOnly?: boolean;
   onSlotClick: (slot: ActiveSlot) => void;
   onDragStart: (slot: ActiveSlot) => void;
   onDrop: (slot: ActiveSlot) => void;
@@ -34,14 +37,11 @@ function linkColor(q: string) {
   return 'var(--chem-red)';
 }
 
-// Inset the formation coordinates so no card ever touches (and gets clipped by)
-// the edge of the pitch.
 const PADX = 8;
 const PADY = 10;
 const cx = (x: number) => PADX + (x / 100) * (100 - 2 * PADX);
 const cy = (y: number) => PADY + ((100 - y) / 100) * (100 - 2 * PADY);
 
-/** A drafted player on the pitch: compact card at rest, full card on hover. */
 function PitchCard({
   player,
   chem,
@@ -52,6 +52,8 @@ function PitchCard({
   onTap,
   onDragStart,
   onDrop,
+  readOnly,
+  cardScale,
 }: {
   player: Player;
   chem?: number;
@@ -62,46 +64,56 @@ function PitchCard({
   onTap?: () => void;
   onDragStart?: () => void;
   onDrop?: () => void;
+  readOnly?: boolean;
+  cardScale?: number;
 }) {
+  const scale = cardScale ?? 1;
   return (
     <div
-      className="group relative -translate-x-1/2 -translate-y-1/2"
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        onDrop?.();
-      }}
+      className="group relative"
+      onDragOver={readOnly ? undefined : (e) => e.preventDefault()}
+      onDrop={
+        readOnly
+          ? undefined
+          : (e) => {
+              e.preventDefault();
+              onDrop?.();
+            }
+      }
+      style={{ transform: `translate(-50%, -50%) scale(${scale})` }}
     >
       <div
-        draggable
-        onDragStart={onDragStart}
-        onClick={onTap}
+        draggable={!readOnly}
+        onDragStart={readOnly ? undefined : onDragStart}
+        onClick={readOnly ? undefined : onTap}
         className={clsx(
-          'relative cursor-grab active:cursor-grabbing touch-manipulation',
+          'relative touch-manipulation',
+          readOnly ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
           dragging && 'opacity-40',
           swapSelected && 'glow-active scale-105'
         )}
-        title={`${player.name} — tap or drag to swap`}
       >
         <PlayerCard player={player} size="2xs" chemScore={chem} posFit={posFit} />
       </div>
-      {/* Full card on hover — the same card you draft, with stats + club/league */}
-      <div
-        className={clsx(
-          'hidden group-hover:block absolute left-1/2 -translate-x-1/2 z-50 pointer-events-none drop-shadow-2xl',
-          popoverBelow ? 'top-full mt-1' : 'bottom-full mb-1'
-        )}
-      >
-        <PlayerCard player={player} size="sm" chemScore={chem} posFit={posFit} />
-      </div>
+      {!readOnly && (
+        <div
+          className={clsx(
+            'pitch-hover-card hidden group-hover:block absolute left-1/2 -translate-x-1/2 z-50 pointer-events-none drop-shadow-2xl',
+            popoverBelow ? 'top-full mt-1' : 'bottom-full mb-1'
+          )}
+        >
+          <PlayerCard player={player} size="sm" chemScore={chem} posFit={posFit} />
+        </div>
+      )}
     </div>
   );
 }
 
-/** Bench/reserve: peek (top of card) at rest, full card on hover. */
+/** Single bench slot — collapsed peek; hover/scroll reveals full card above. */
 function BenchSlot({
   player,
   label,
+  isReserve,
   active,
   dragging,
   swapSelected,
@@ -109,9 +121,11 @@ function BenchSlot({
   onClick,
   onDragStart,
   onDrop,
+  readOnly,
 }: {
   player: Player | null;
   label: string;
+  isReserve?: boolean;
   active?: boolean;
   dragging?: boolean;
   swapSelected?: boolean;
@@ -119,47 +133,72 @@ function BenchSlot({
   onClick?: () => void;
   onDragStart?: () => void;
   onDrop?: () => void;
+  readOnly?: boolean;
 }) {
-  if (!player) {
-    return (
-      <div style={{ width: 50, height: 30 }} className="flex items-start justify-center overflow-visible">
-        <CardSkeleton label={label} active={active} compact onClick={onClick} onDrop={onDrop} />
-      </div>
-    );
-  }
   return (
     <div
-      className="group relative overflow-hidden hover:overflow-visible hover:z-40"
-      style={{ width: 50, height: 30 }}
-      title={`${player.name} — drag to swap`}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        onDrop?.();
-      }}
+      className={clsx(
+        'bench-slot group relative flex-1 min-w-0 max-w-[48px] rounded-sm transition-all duration-200',
+        isReserve && 'opacity-90',
+        active && 'ring-1 ring-gold/70',
+        swapSelected && 'ring-2 ring-gold',
+        !player && 'border border-dashed',
+        !player ? 'border-white/25 bg-white/[0.03]' : 'border-white/10 bg-black/20'
+      )}
+      style={{ height: BENCH_PEEK_H }}
+      onDragOver={readOnly ? undefined : (e) => e.preventDefault()}
+      onDrop={
+        readOnly
+          ? undefined
+          : (e) => {
+              e.preventDefault();
+              onDrop?.();
+            }
+      }
     >
-      {/* peek */}
-      <div
-        draggable
-        onDragStart={onDragStart}
-        onClick={onClick}
-        className={clsx(
-          'absolute top-0 left-1/2 -translate-x-1/2 cursor-grab active:cursor-grabbing touch-manipulation',
-          dragging && 'opacity-40',
-          swapSelected && 'glow-active scale-105'
-        )}
-      >
-        <PlayerCard player={player} size="2xs" posFit={posFit} />
-      </div>
-      {/* full card on hover */}
-      <div className="hidden group-hover:block absolute bottom-full mb-1 left-1/2 -translate-x-1/2 z-50 pointer-events-none drop-shadow-2xl">
-        <PlayerCard player={player} size="sm" posFit={posFit} />
-      </div>
+      {player ? (
+        <>
+          <div
+            className="absolute inset-0 overflow-hidden rounded-sm"
+            draggable={!readOnly}
+            onDragStart={readOnly ? undefined : onDragStart}
+            onClick={readOnly ? undefined : onClick}
+            style={{ cursor: readOnly ? 'default' : 'grab' }}
+          >
+            <div
+              className="absolute top-0 left-1/2 -translate-x-1/2 pointer-events-none"
+              style={{ opacity: dragging ? 0.35 : 1 }}
+            >
+              <PlayerCard player={player} size="2xs" posFit={posFit} />
+            </div>
+          </div>
+          {!readOnly && (
+            <div className="bench-slot-expand absolute bottom-full left-1/2 -translate-x-1/2 mb-1 z-50 pointer-events-none drop-shadow-2xl opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+              <PlayerCard player={player} size="sm" posFit={posFit} />
+            </div>
+          )}
+        </>
+      ) : (
+        <button
+          type="button"
+          disabled={readOnly}
+          onClick={onClick}
+          className="absolute inset-0 flex items-end justify-center pb-0.5 touch-manipulation disabled:cursor-default"
+        >
+          <span
+            className={clsx(
+              'font-display font-bold text-[8px] tracking-wide uppercase',
+              active ? 'text-gold' : 'text-white/35'
+            )}
+          >
+            {label}
+          </span>
+        </button>
+      )}
     </div>
   );
 }
 
-/** Empty starter outline — a shield-shaped slate skeleton with the slot label. */
 function CardSkeleton({
   label,
   active,
@@ -190,7 +229,6 @@ function CardSkeleton({
       )}
       style={{ width: w, height: h }}
     >
-      {/* slate shield body */}
       <div
         className="absolute inset-0"
         style={{
@@ -200,7 +238,6 @@ function CardSkeleton({
             : 'linear-gradient(160deg, rgba(30,41,59,0.55), rgba(15,23,42,0.4))',
         }}
       />
-      {/* dashed inner border (inset shield) */}
       <div
         className="absolute"
         style={{
@@ -228,16 +265,23 @@ export function SquadBoard({
   formation,
   starterPlayers,
   benchPlayers,
-  benchGroups,
   subsCount,
   chem,
   activeSlot,
   draggingSlot,
   swapSource,
+  compact = false,
+  readOnly = false,
   onSlotClick,
   onDragStart,
   onDrop,
 }: SquadBoardProps) {
+  const [benchOpen, setBenchOpen] = useState(false);
+  const noop = () => {};
+  const onClick = readOnly ? noop : onSlotClick;
+  const onDrag = readOnly ? noop : onDragStart;
+  const onDropSlot = readOnly ? noop : onDrop;
+
   const isActive = (zone: 'starter' | 'bench', i: number) =>
     activeSlot?.zone === zone && activeSlot.index === i;
   const isDragging = (zone: 'starter' | 'bench', i: number) =>
@@ -245,8 +289,6 @@ export function SquadBoard({
   const isSwapSelected = (zone: 'starter' | 'bench', i: number) =>
     swapSource?.zone === zone && swapSource.index === i;
 
-  // Full structural link graph — drawn immediately on formation lock. Each edge
-  // is "unlit" charcoal until BOTH its slots are occupied, then it lights up.
   const adj = getAdjacency(formation);
   const litMap = new Map<string, string>();
   for (const l of chem.links) litMap.set(`${l.from}-${l.to}`, l.quality);
@@ -259,30 +301,33 @@ export function SquadBoard({
 
   const benchSlot = (i: number) => {
     const bp = benchPlayers[i] ?? null;
-    const group = benchGroups[i] ?? '?';
+    const isReserve = i >= subsCount;
     return (
       <BenchSlot
         key={i}
         player={bp}
-        label={group}
+        label=""
+        isReserve={isReserve}
         active={isActive('bench', i)}
         dragging={isDragging('bench', i)}
         swapSelected={isSwapSelected('bench', i)}
-        posFit={bp && group !== 'RES' ? positionCategory(bp.position, group) : undefined}
-        onClick={() => onSlotClick({ zone: 'bench', index: i })}
-        onDragStart={() => onDragStart({ zone: 'bench', index: i })}
-        onDrop={() => onDrop({ zone: 'bench', index: i })}
+        posFit={undefined}
+        readOnly={readOnly}
+        onClick={() => onClick({ zone: 'bench', index: i })}
+        onDragStart={() => onDrag({ zone: 'bench', index: i })}
+        onDrop={() => onDropSlot({ zone: 'bench', index: i })}
       />
     );
   };
 
   return (
-    <div className="flex flex-col gap-2">
-      {/* Pitch — wrapper is overflow-visible so hover cards aren't clipped; the
-          grass + chem lines live in an inner clipped layer. */}
+    <div className="flex flex-col gap-1 h-full min-h-0">
       <div
-        className="relative mx-auto"
-        style={{ aspectRatio: '7 / 9', height: 'min(64cqh, 680px)', maxWidth: '94cqw' }}
+        className="relative mx-auto w-full flex-1 min-h-0"
+        style={{
+          aspectRatio: '7 / 9',
+          maxHeight: compact ? 'min(40cqh, 50vh)' : 'min(62cqh, 78vh)',
+        }}
       >
         <div
           className="absolute inset-0 rounded-xl overflow-hidden border border-white/10"
@@ -292,10 +337,8 @@ export function SquadBoard({
             <rect x="2" y="2" width="96" height="129" fill="none" stroke="#ffffff12" strokeWidth="0.5" />
             <line x1="2" y1="66.5" x2="98" y2="66.5" stroke="#ffffff12" strokeWidth="0.5" />
             <circle cx="50" cy="66.5" r="10" fill="none" stroke="#ffffff12" strokeWidth="0.5" />
-            {/* Top penalty area */}
             <rect x="22" y="2" width="56" height="18" fill="none" stroke="#ffffff12" strokeWidth="0.5" />
             <rect x="35" y="2" width="30" height="6" fill="none" stroke="#ffffff12" strokeWidth="0.5" />
-            {/* Bottom penalty area */}
             <rect x="22" y="113" width="56" height="18" fill="none" stroke="#ffffff12" strokeWidth="0.5" />
             <rect x="35" y="125" width="30" height="6" fill="none" stroke="#ffffff12" strokeWidth="0.5" />
           </svg>
@@ -345,16 +388,19 @@ export function SquadBoard({
                   dragging={isDragging('starter', i)}
                   swapSelected={isSwapSelected('starter', i)}
                   popoverBelow={pos.y >= 52}
-                  onTap={() => onSlotClick({ zone: 'starter', index: i })}
-                  onDragStart={() => onDragStart({ zone: 'starter', index: i })}
-                  onDrop={() => onDrop({ zone: 'starter', index: i })}
+                  readOnly={readOnly}
+                  cardScale={compact ? 0.78 : 1}
+                  onTap={() => onClick({ zone: 'starter', index: i })}
+                  onDragStart={() => onDrag({ zone: 'starter', index: i })}
+                  onDrop={() => onDropSlot({ zone: 'starter', index: i })}
                 />
               ) : (
                 <CardSkeleton
                   label={pos.slot}
                   active={isActive('starter', i)}
-                  onClick={() => onSlotClick({ zone: 'starter', index: i })}
-                  onDrop={() => onDrop({ zone: 'starter', index: i })}
+                  compact={compact}
+                  onClick={readOnly ? undefined : () => onClick({ zone: 'starter', index: i })}
+                  onDrop={readOnly ? undefined : () => onDropSlot({ zone: 'starter', index: i })}
                 />
               )}
             </div>
@@ -362,23 +408,65 @@ export function SquadBoard({
         })}
       </div>
 
-      {/* Substitutes */}
-      <div className="mx-auto w-full max-w-xl">
-        <div className="font-display text-[10px] tracking-[0.3em] text-white/40 uppercase mb-0.5 text-center">
-          Substitutes
+      {/* Bench: all 12 slots visible; hover lifts full cards */}
+      <div
+        className="group/bench relative mx-auto w-full shrink-0"
+        tabIndex={0}
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setBenchOpen(false);
+        }}
+      >
+        <button
+          type="button"
+          className="font-display text-[8px] tracking-[0.25em] text-white/35 uppercase mb-0.5 text-center w-full hover:text-gold/70 transition-colors"
+          onClick={() => setBenchOpen((v) => !v)}
+          aria-expanded={benchOpen}
+          aria-label="Toggle bench preview"
+        >
+          Bench {benchOpen ? '▾' : '▸'}
+        </button>
+        <div className="bench-strip flex flex-nowrap items-end gap-0.5 px-1 py-1.5 rounded-lg bg-black/25 border border-white/8">
+          {benchPlayers.map((_, i) => (
+            <span key={i} className="contents">
+              {i === subsCount && (
+                <div
+                  className="shrink-0 w-px self-stretch bg-white/15 mx-px"
+                  aria-hidden
+                  style={{ minHeight: BENCH_PEEK_H }}
+                />
+              )}
+              {benchSlot(i)}
+            </span>
+          ))}
         </div>
-        <div className="bench-strip flex flex-nowrap justify-center gap-1.5 rounded-lg pt-1.5 pb-2 px-2">
-          {Array.from({ length: subsCount }, (_, k) => benchSlot(k))}
-        </div>
-      </div>
-
-      {/* Reserves */}
-      <div className="mx-auto w-full max-w-xl">
-        <div className="font-display text-[10px] tracking-[0.3em] text-white/40 uppercase mb-0.5 text-center">
-          Reserves
-        </div>
-        <div className="bench-strip flex flex-nowrap justify-center gap-1.5 rounded-lg pt-1.5 pb-2 px-2">
-          {Array.from({ length: benchPlayers.length - subsCount }, (_, k) => benchSlot(subsCount + k))}
+        <div
+          className={clsx(
+            'pointer-events-none absolute bottom-full left-0 right-0 mb-1 scale-[0.97] transition-all duration-200 z-50',
+            'opacity-0 group-hover/bench:opacity-100 group-hover/bench:scale-100',
+            'group-focus-within/bench:opacity-100 group-focus-within/bench:scale-100',
+            benchOpen && 'opacity-100 scale-100'
+          )}
+        >
+          <div className="rounded-lg border border-gold/35 bg-primary/98 shadow-2xl px-1 py-2">
+            <div className="flex flex-nowrap items-end justify-between gap-0.5">
+              {benchPlayers.map((bp, i) => (
+                <div
+                  key={i}
+                  className="flex-1 min-w-0 flex justify-center"
+                  style={{ maxWidth: '48px' }}
+                >
+                  {bp ? (
+                    <PlayerCard player={bp} size="xs" />
+                  ) : (
+                    <div
+                      className="border border-dashed border-white/20 rounded-sm w-full"
+                      style={{ height: 52 }}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>

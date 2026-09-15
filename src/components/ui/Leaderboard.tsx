@@ -1,6 +1,9 @@
 'use client';
 
+import { useState } from 'react';
 import { useLeaderboard } from '@/hooks/useLeaderboard';
+import { SquadViewer } from '@/components/draft/SquadViewer';
+import { snapshotToSquad } from '@/lib/squadShare';
 
 const TIER_COLORS: Record<string, string> = {
   Champions: 'text-gold',
@@ -11,12 +14,27 @@ const TIER_COLORS: Record<string, string> = {
 
 export function Leaderboard() {
   const { entries, mode, loading, error } = useLeaderboard();
+  const [viewingId, setViewingId] = useState<string | null>(null);
+
+  const viewingEntry = entries.find((e) => e.id === viewingId);
+  const viewingSquad = viewingEntry?.squad ? snapshotToSquad(viewingEntry.squad) : null;
 
   if (loading) {
     return (
       <div className="text-center py-8 text-white/40 font-body">
         <p>Loading leaderboard…</p>
       </div>
+    );
+  }
+
+  if (viewingSquad) {
+    return (
+      <SquadViewer
+        squad={viewingSquad}
+        resultLabel={viewingEntry?.result}
+        shareUrl={viewingEntry?.shareUrl}
+        onClose={() => setViewingId(null)}
+      />
     );
   }
 
@@ -51,63 +69,73 @@ export function Leaderboard() {
           <p className="text-sm mt-1">Complete a draft to appear here.</p>
         </div>
       ) : (
-        <table className="w-full font-body text-sm">
-          <thead>
-            <tr className="text-white/50 border-b border-white/10 text-left">
-              <th className="pb-2 pr-3 font-medium">#</th>
-              <th className="pb-2 pr-3 font-medium">Team</th>
-              <th className="pb-2 pr-3 font-medium">Formation</th>
-              <th className="pb-2 pr-3 font-medium text-right">Score</th>
-              <th className="pb-2 font-medium">Result</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry, i) => (
-              <tr
-                key={entry.id}
-                className="border-b border-white/5 hover:bg-white/5 transition-colors"
-              >
-                <td className="py-2.5 pr-3">
-                  <span
-                    className={
-                      i === 0
-                        ? 'text-gold font-bold'
-                        : i === 1
-                        ? 'text-white/60'
-                        : 'text-white/40'
-                    }
-                  >
-                    {i + 1}
-                  </span>
-                </td>
-                <td className="py-2.5 pr-3 text-white font-medium truncate max-w-[120px]">
-                  {entry.teamName}
-                </td>
-                <td className="py-2.5 pr-3 text-white/60">{entry.formation}</td>
-                <td className="py-2.5 pr-3 text-right">
-                  <span
-                    className={
-                      entry.draftScore >= 190
-                        ? 'text-gold font-bold'
-                        : entry.draftScore >= 180
-                        ? 'text-accent font-semibold'
-                        : 'text-white'
-                    }
-                  >
-                    {entry.draftScore}
-                  </span>
-                </td>
-                <td
-                  className={`py-2.5 text-xs ${
-                    TIER_COLORS[entry.result] ?? 'text-white/50'
-                  }`}
-                >
-                  {entry.result}
-                </td>
+        <>
+          <p className="font-body text-[10px] text-white/30 mb-2">Tap a row to view the squad</p>
+          <table className="w-full font-body text-sm">
+            <thead>
+              <tr className="text-white/50 border-b border-white/10 text-left">
+                <th className="pb-2 pr-3 font-medium">#</th>
+                <th className="pb-2 pr-3 font-medium">Team</th>
+                <th className="pb-2 pr-3 font-medium">Formation</th>
+                <th className="pb-2 pr-3 font-medium text-right">Score</th>
+                <th className="pb-2 font-medium">Result</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {entries.map((entry, i) => {
+                const clickable = !!entry.squad;
+                return (
+                  <tr
+                    key={entry.id}
+                    onClick={() => clickable && setViewingId(entry.id)}
+                    className={`border-b border-white/5 transition-colors ${
+                      clickable ? 'hover:bg-white/10 cursor-pointer' : 'hover:bg-white/5'
+                    }`}
+                  >
+                    <td className="py-2.5 pr-3">
+                      <span
+                        className={
+                          i === 0
+                            ? 'text-gold font-bold'
+                            : i === 1
+                            ? 'text-white/60'
+                            : 'text-white/40'
+                        }
+                      >
+                        {i + 1}
+                      </span>
+                    </td>
+                    <td className="py-2.5 pr-3 text-white font-medium truncate max-w-[120px]">
+                      {entry.teamName}
+                      {clickable && <span className="ml-1 text-accent text-[10px]">↗</span>}
+                    </td>
+                    <td className="py-2.5 pr-3 text-white/60">{entry.formation}</td>
+                    <td className="py-2.5 pr-3 text-right">
+                      <span
+                        className={
+                          entry.draftScore >= 190
+                            ? 'text-gold font-bold'
+                            : entry.draftScore >= 180
+                            ? 'text-accent font-semibold'
+                            : 'text-white'
+                        }
+                      >
+                        {entry.draftScore}
+                      </span>
+                    </td>
+                    <td
+                      className={`py-2.5 text-xs ${
+                        TIER_COLORS[entry.result] ?? 'text-white/50'
+                      }`}
+                    >
+                      {entry.result}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </>
       )}
     </div>
   );

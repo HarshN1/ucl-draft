@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useCallback } from 'react';
+import { getMuted } from '@/lib/soundSettings';
 
 let audioCtx: AudioContext | null = null;
 let goalBuffer: AudioBuffer | null = null;
@@ -61,7 +62,7 @@ export function useSound() {
   }, []);
 
   const playGoal = useCallback(() => {
-    if (!audioCtx) return;
+    if (!audioCtx || getMuted()) return;
     try {
       if (goalBuffer) {
         const source = audioCtx.createBufferSource();
@@ -77,7 +78,7 @@ export function useSound() {
   }, []);
 
   const playTone = useCallback((freq: number, duration = 0.15) => {
-    if (!audioCtx) return;
+    if (!audioCtx || getMuted()) return;
     try {
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();

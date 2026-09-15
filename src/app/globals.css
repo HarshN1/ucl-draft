@@ -125,6 +125,64 @@ body::after {
     radial-gradient(circle at 50% 15%, #11364a 0%, #071722 70%, #030a0f 100%);
 }
 
+/* ── Responsive game shell: full-screen phone, letterboxed desktop ───────── */
+.game-shell {
+  padding:
+    env(safe-area-inset-top, 0)
+    env(safe-area-inset-right, 0)
+    env(safe-area-inset-bottom, 0)
+    env(safe-area-inset-left, 0);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.game-stage {
+  width: 100%;
+  height: 100%;
+  width: 100dvw;
+  height: 100dvh;
+  max-width: 100%;
+  max-height: 100%;
+  container-type: size;
+  overflow: hidden;
+}
+
+/* Wide monitors: keep content readable without a tiny letterbox */
+@media (min-width: 1200px) and (min-aspect-ratio: 16/9) {
+  .game-stage {
+    width: min(100dvw, 1600px);
+    height: 100dvh;
+    margin-inline: auto;
+  }
+}
+
+/* Bench: all 12 slots fit in one row — no horizontal scroll */
+.bench-strip {
+  overflow: hidden;
+}
+.bench-strip > * {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* Bench peek expands on hover / tap focus */
+.bench-slot:focus-within .bench-slot-expand,
+.bench-slot:hover .bench-slot-expand {
+  opacity: 1;
+}
+@media (hover: none) {
+  .bench-slot:active .bench-slot-expand {
+    opacity: 1;
+  }
+}
+
+/* Hide hover-only popovers on touch devices */
+@media (hover: none) {
+  .pitch-hover-card {
+    display: none !important;
+  }
+}
+
 /* Intense layered glow for active/selected console items (follows clip shapes) */
 .glow-active {
   filter: drop-shadow(0 0 12px #e2ae16) drop-shadow(0 0 2px #e2ae16);
@@ -218,7 +276,113 @@ body::after {
   transform: skewX(12deg);
 }
 
-.draft-overlay {
-  background: rgba(3, 10, 15, 0.82);
-  backdrop-filter: blur(12px) brightness(0.45);
+/* ── Draft screen: fluid type + pick band ─────────────────────────────────── */
+.draft-screen {
+  padding: clamp(4px, 1.2cqh, 12px) clamp(6px, 1.5cqw, 20px);
+}
+
+.draft-stat-value {
+  font-size: clamp(1.25rem, 5cqh, 2.25rem);
+}
+.draft-stat-label {
+  font-size: clamp(7px, 1.8cqh, 10px);
+}
+.draft-header-sub {
+  font-size: clamp(8px, 2cqh, 11px);
+}
+.draft-header-main {
+  font-size: clamp(1rem, 4.5cqh, 1.75rem);
+}
+.draft-hint {
+  font-size: clamp(9px, 2.2cqh, 12px);
+}
+
+.draft-board-wrap {
+  max-width: min(96cqw, 56rem);
+}
+
+.draft-board--dimmed {
+  filter: blur(3px) brightness(0.72) saturate(0.85);
+  transform: scale(0.98);
+  transition: filter 0.25s ease, transform 0.25s ease;
+}
+
+.draft-board--focused {
+  filter: none;
+  transform: scale(1);
+  transition: filter 0.25s ease, transform 0.25s ease;
+}
+
+/* Light blur scrim — squad stays visible behind picks */
+.draft-scrim {
+  background: rgba(6, 18, 28, 0.28);
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+}
+
+.draft-scrim--peek {
+  background: rgba(6, 18, 28, 0.08);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.draft-pick-band {
+  container-type: inline-size;
+  padding-inline: clamp(0px, 1cqw, 8px);
+}
+
+.draft-pick-band__inner {
+  width: 100%;
+  background: linear-gradient(
+    180deg,
+    rgba(8, 28, 40, 0.92) 0%,
+    rgba(12, 36, 50, 0.96) 50%,
+    rgba(8, 28, 40, 0.92) 100%
+  );
+  border-top: 2px solid var(--gold);
+  border-bottom: 2px solid var(--gold);
+  box-shadow:
+    0 0 40px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  padding: clamp(8px, 2cqh, 18px) clamp(8px, 2cqw, 24px);
+}
+
+.draft-pick-band__title {
+  font-size: clamp(0.8rem, 3.5cqh, 1.35rem);
+  letter-spacing: 0.12em;
+  margin-bottom: clamp(4px, 1.2cqh, 12px);
+}
+
+.draft-pick-band__cards {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  min-height: clamp(120px, 28cqh, 220px);
+}
+
+.draft-card-row {
+  transform-origin: center bottom;
+}
+
+@container (max-width: 520px) {
+  .draft-card-slot {
+    transform: scale(0.88);
+    transform-origin: center bottom;
+  }
+  .draft-chem-delta {
+    font-size: 9px;
+  }
+}
+
+.draft-chem-delta {
+  font-size: clamp(9px, 2cqh, 12px);
+}
+
+@container (min-width: 900px) {
+  .draft-card-slot {
+    transform: scale(1.05);
+    transform-origin: center bottom;
+  }
 }

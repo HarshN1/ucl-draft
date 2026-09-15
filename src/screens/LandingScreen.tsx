@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Leaderboard } from '@/components/ui/Leaderboard';
+import { RulesModal, useRulesOnFirstVisit } from '@/components/ui/RulesModal';
 
 interface LandingScreenProps {
   onStart: () => void;
@@ -13,10 +14,10 @@ interface LandingScreenProps {
 
 export function LandingScreen({ onStart, isLoading, error }: LandingScreenProps) {
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const { rulesOpen, closeRules, openRules } = useRulesOnFirstVisit();
 
   return (
     <div className="h-full flex flex-col items-center justify-center px-4 relative overflow-hidden">
-      {/* Background decoration */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
@@ -25,10 +26,8 @@ export function LandingScreen({ onStart, isLoading, error }: LandingScreenProps)
         }}
       />
 
-      {/* UCL stars pattern */}
       <div className="absolute top-8 left-1/2 -translate-x-1/2 opacity-10">
         <svg width="120" height="120" viewBox="0 0 120 120">
-          {/* UCL starball simplified */}
           <circle cx="60" cy="60" r="55" stroke="#00d4ff" strokeWidth="2" fill="none" />
           <circle cx="60" cy="60" r="35" stroke="#00d4ff" strokeWidth="1.5" fill="none" />
           {Array.from({ length: 8 }, (_, i) => {
@@ -41,9 +40,8 @@ export function LandingScreen({ onStart, isLoading, error }: LandingScreenProps)
       </div>
 
       <div className="relative z-10 flex flex-col items-center gap-6 text-center max-w-lg">
-        {/* Title */}
         <div className="flex flex-col items-center">
-          <span className="font-display font-bold text-2xl md:text-3xl text-white/70 tracking-[0.35em] uppercase">
+          <span className="font-display font-bold text-xl text-white/50 tracking-[0.4em] uppercase">
             FUT
           </span>
           <h1 className="font-display font-bold text-6xl md:text-8xl text-gold tracking-tight leading-none text-glow-gold">
@@ -51,20 +49,6 @@ export function LandingScreen({ onStart, isLoading, error }: LandingScreenProps)
           </h1>
         </div>
 
-        {/* Tagline */}
-        <p className="font-body text-white/50 text-base md:text-lg">
-          Build your squad. Chase 194.
-        </p>
-
-        {/* Score reminder */}
-        <div className="flex gap-3 text-xs font-display text-white/30 uppercase tracking-widest">
-          <span>OVR + Chemistry</span>
-          <span className="text-accent">=</span>
-          <span>Draft Score</span>
-          <span className="text-accent/50">max 200</span>
-        </div>
-
-        {/* Error */}
         {error && (
           <div className="bg-ucl-red/10 border border-ucl-red/30 rounded-lg px-4 py-3 text-ucl-red text-sm font-body">
             {error.includes('players.json')
@@ -73,27 +57,29 @@ export function LandingScreen({ onStart, isLoading, error }: LandingScreenProps)
           </div>
         )}
 
-        {/* CTAs */}
-        <div className="flex gap-3 mt-2">
-          <Button variant="primary" size="lg" onClick={onStart} disabled={isLoading}>
-            {isLoading ? 'Loading...' : '⚡ Start Draft'}
+        <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
+          <Button variant="primary" size="lg" onClick={onStart} disabled={isLoading} className="flex-1">
+            {isLoading ? 'Loading…' : 'Start Draft'}
           </Button>
-          <Button variant="ghost" size="lg" onClick={() => setShowLeaderboard(true)}>
-            🏆 Leaderboard
+          <Button variant="ghost" size="lg" onClick={() => setShowLeaderboard(true)} className="flex-1">
+            Leaderboard
           </Button>
         </div>
+
+        <button
+          type="button"
+          onClick={openRules}
+          className="font-display text-[10px] uppercase tracking-widest text-white/35 hover:text-gold/80 transition-colors"
+        >
+          How to play
+        </button>
       </div>
 
-      {/* Leaderboard modal */}
-      <Modal
-        isOpen={showLeaderboard}
-        onClose={() => setShowLeaderboard(false)}
-        size="md"
-      >
+      <RulesModal isOpen={rulesOpen} onClose={closeRules} />
+
+      <Modal isOpen={showLeaderboard} onClose={() => setShowLeaderboard(false)} size="md">
         <div className="p-6">
-          <h2 className="font-display font-bold text-xl text-white mb-4">
-            🏆 Draft Leaderboard
-          </h2>
+          <h2 className="font-display font-bold text-xl text-white mb-4">Leaderboard</h2>
           <Leaderboard />
           <div className="mt-4 flex justify-end">
             <Button variant="ghost" size="sm" onClick={() => setShowLeaderboard(false)}>

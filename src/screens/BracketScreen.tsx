@@ -4,6 +4,7 @@ import type { BracketRound } from '@/types';
 import { UCLBracket } from '@/components/bracket/UCLBracket';
 import { Button } from '@/components/ui/Button';
 import { findUserMatch } from '@/engine/bracketEngine';
+import { proxied } from '@/lib/img';
 
 interface BracketScreenProps {
   rounds: BracketRound[];
@@ -11,6 +12,7 @@ interface BracketScreenProps {
   currentMatchIndex: number;
   onPlayMatch: () => void;
   teamName: string;
+  draftScore?: number;
 }
 
 export function BracketScreen({
@@ -19,6 +21,7 @@ export function BracketScreen({
   currentMatchIndex,
   onPlayMatch,
   teamName,
+  draftScore,
 }: BracketScreenProps) {
   const userMatchInfo = findUserMatch(rounds, currentRound);
   const userMatch = userMatchInfo?.match;
@@ -31,37 +34,41 @@ export function BracketScreen({
   const roundName = rounds[currentRound]?.name ?? '';
 
   return (
-    <div className="h-full overflow-y-auto flex flex-col px-4 py-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8 max-w-7xl mx-auto w-full">
-        <div>
-          <div className="font-display text-white/30 text-xs uppercase tracking-widest mb-1">
-            UCL Knockout Stage
+    <div className="h-full overflow-hidden flex flex-col px-2 md:px-3 py-2 md:py-3">
+      <div className="max-w-7xl mx-auto w-full shrink-0 rounded-lg border border-white/10 bg-gradient-to-r from-primary/90 via-primary/70 to-primary/90 px-3 py-2 mb-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="font-display text-accent text-[9px] uppercase tracking-[0.3em]">
+              UEFA Champions League
+            </div>
+            <h2 className="font-display font-bold text-lg md:text-xl text-white truncate">{roundName}</h2>
           </div>
-          <h2 className="font-display font-bold text-3xl text-white">
-            <span className="text-accent">{roundName}</span>
-          </h2>
+          {opponent && (
+            <div className="flex items-center gap-2 shrink-0 text-right">
+              <div className="min-w-0">
+                <div className="font-display text-white/35 text-[8px] uppercase tracking-widest">Next</div>
+                <div className="font-display font-bold text-white text-xs md:text-sm truncate max-w-[140px]">
+                  vs <span className="text-accent">{opponent.name}</span>
+                </div>
+              </div>
+              {opponent.badgeUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={proxied(opponent.badgeUrl)}
+                  alt=""
+                  className="h-8 w-8 object-contain shrink-0"
+                />
+              )}
+            </div>
+          )}
         </div>
-
-        {opponent && (
-          <div className="text-right">
-            <div className="font-display text-white/30 text-xs uppercase tracking-widest mb-1">
-              Your Next Match
-            </div>
-            <div className="font-display font-bold text-white text-lg">
-              {teamName}{' '}
-              <span className="text-white/30">vs</span>{' '}
-              <span className="text-accent">{opponent.name}</span>
-            </div>
-            <div className="font-body text-white/40 text-xs mt-0.5">
-              OVR {opponent.ovr}
-            </div>
-          </div>
-        )}
+        <div className="mt-1 font-display text-[9px] text-white/30 uppercase tracking-widest truncate">
+          {teamName}
+          {draftScore !== undefined ? ` · Draft score ${draftScore}` : ''}
+        </div>
       </div>
 
-      {/* Bracket */}
-      <div className="max-w-7xl mx-auto w-full flex-1">
+      <div className="max-w-7xl mx-auto w-full flex-1 min-h-0 rounded-lg border border-white/8 bg-black/20 p-1 md:p-2">
         <UCLBracket
           rounds={rounds}
           currentRound={currentRound}
@@ -70,10 +77,9 @@ export function BracketScreen({
         />
       </div>
 
-      {/* Play button */}
-      <div className="flex justify-center mt-8">
-        <Button variant="primary" size="lg" onClick={onPlayMatch}>
-          ▶ Play Match
+      <div className="shrink-0 flex justify-center mt-2 pb-[env(safe-area-inset-bottom)] max-w-md mx-auto w-full">
+        <Button variant="primary" size="md" onClick={onPlayMatch} className="w-full">
+          Play Match
         </Button>
       </div>
     </div>

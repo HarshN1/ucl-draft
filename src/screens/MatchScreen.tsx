@@ -53,35 +53,34 @@ export function MatchScreen({
   const oppScore = result ? result.opponentScore : 0;
 
   return (
-    <div className="h-full overflow-y-auto flex flex-col px-4 py-8">
-      {/* Score ticker */}
-      <div className="flex items-center justify-center mb-8">
-        <div className="bg-primary border border-white/10 rounded-xl px-8 py-4 text-center min-w-[280px]">
-          <div className="font-display text-white/30 text-xs uppercase tracking-widest mb-2">
+    <div className="h-full overflow-hidden flex flex-col px-3 py-2 md:py-3">
+      <div className="flex items-center justify-center mb-2 shrink-0">
+        <div className="bg-primary border border-white/10 rounded-xl px-5 py-2 text-center min-w-[240px]">
+          <div className="font-display text-white/30 text-[9px] uppercase tracking-widest mb-1">
             {roundName}
           </div>
-          <div className="flex items-center justify-center gap-6">
+          <div className="flex items-center justify-center gap-4">
             <div className="text-right">
-              <div className="font-display font-bold text-white text-sm truncate max-w-[120px]">
+              <div className="font-display font-bold text-white text-xs truncate max-w-[100px]">
                 {squad.teamName}
               </div>
               <div
                 className={clsx(
-                  'font-display font-bold text-5xl',
+                  'font-display font-bold text-3xl md:text-4xl',
                   result && userScore > oppScore ? 'text-ucl-green' : 'text-white'
                 )}
               >
                 {result ? userScore : '–'}
               </div>
             </div>
-            <div className="font-display text-white/30 text-2xl">–</div>
+            <div className="font-display text-white/30 text-xl">–</div>
             <div className="text-left">
-              <div className="font-display font-bold text-white text-sm truncate max-w-[120px]">
+              <div className="font-display font-bold text-white text-xs truncate max-w-[100px]">
                 {opponent.name}
               </div>
               <div
                 className={clsx(
-                  'font-display font-bold text-5xl',
+                  'font-display font-bold text-3xl md:text-4xl',
                   result && oppScore > userScore ? 'text-ucl-red' : 'text-white'
                 )}
               >
@@ -90,40 +89,37 @@ export function MatchScreen({
             </div>
           </div>
           {result?.wentToET && (
-            <div className="font-display text-xs text-gold mt-1 uppercase tracking-widest">
+            <div className="font-display text-[9px] text-gold mt-0.5 uppercase tracking-widest">
               {result.wentToPenalties
-                ? `${result.userPenScore}–${result.oppPenScore} on penalties`
-                : 'After Extra Time'}
+                ? `${result.userPenScore}–${result.oppPenScore} pens`
+                : 'AET'}
             </div>
           )}
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="flex gap-8 max-w-5xl mx-auto w-full flex-wrap justify-center">
-        {/* Events feed */}
-        <div className="flex-1 min-w-[280px] max-w-xl">
-          <div className="font-display text-xs text-white/30 uppercase tracking-widest mb-3">
+      <div className="flex-1 min-h-0 flex gap-3 max-w-5xl mx-auto w-full justify-center items-stretch">
+        <div className="flex-1 min-w-0 max-w-md flex flex-col min-h-0">
+          <div className="font-display text-[9px] text-white/30 uppercase tracking-widest mb-1 shrink-0">
             Match Events
           </div>
-          {result ? (
-            <EventFeed
-              events={result.events}
-              onAllEventsShown={handleAllEventsShown}
-              onGoalEvent={playGoalSound}
-            />
-          ) : (
-            <div className="text-white/30 font-body text-sm animate-pulse">
-              Loading match data...
-            </div>
-          )}
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {result ? (
+              <EventFeed
+                events={result.events}
+                onAllEventsShown={handleAllEventsShown}
+                onGoalEvent={playGoalSound}
+              />
+            ) : (
+              <div className="text-white/30 font-body text-sm animate-pulse">Loading match…</div>
+            )}
+          </div>
         </div>
 
-        {/* Stats panel */}
         {eventsComplete && result && (
-          <div className="w-64 animate-fade-in">
-            <div className="font-display text-xs text-white/30 uppercase tracking-widest mb-3">
-              Full-Time Stats
+          <div className="w-44 shrink-0 animate-fade-in hidden sm:block">
+            <div className="font-display text-[9px] text-white/30 uppercase tracking-widest mb-1">
+              Stats
             </div>
             <MatchStats
               result={result}
@@ -134,19 +130,17 @@ export function MatchScreen({
         )}
       </div>
 
-      {/* View result button */}
       {eventsComplete && result && (
-        <div className="flex justify-center mt-8 animate-fade-in">
+        <div className="shrink-0 flex justify-center mt-2 pb-[env(safe-area-inset-bottom)]">
           <button
             onClick={() => setShowPostMatch(true)}
-            className="font-display font-bold text-accent border border-accent/50 px-6 py-3 rounded-lg hover:bg-accent/10 transition-colors"
+            className="font-display font-bold text-accent border border-accent/50 px-5 py-2 rounded-lg hover:bg-accent/10 transition-colors text-sm"
           >
             View Full Result →
           </button>
         </div>
       )}
 
-      {/* Post-match modal */}
       {result && (
         <PostMatchModal
           isOpen={showPostMatch}

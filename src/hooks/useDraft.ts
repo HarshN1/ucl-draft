@@ -1,6 +1,6 @@
 'use client';
 
-import { useReducer, useCallback, useEffect } from 'react';
+import { useReducer, useCallback, useEffect, useMemo } from 'react';
 import {
   GameState,
   type Player,
@@ -37,19 +37,16 @@ import {
   getUserResult,
   simulateToChampion,
 } from '@/engine/bracketEngine';
-
-// ─── 23-man squad layout ───────────────────────────────────────────────────────
-
-const SUBS_COUNT = 7;
-const RESERVES_COUNT = 5;
-const BENCH_COUNT = SUBS_COUNT + RESERVES_COUNT; // 12
-// Position group for each bench slot (drives position-appropriate draws + labels)
-const BENCH_GROUPS = [
-  // 7 subs: a backup keeper + one per line (position-matched draws)
-  'GK', 'CB', 'FB', 'CDM', 'CM', 'WG', 'ST',
-  // 5 reserves: generic "blind" wildcard slots (any position)
-  'RES', 'RES', 'RES', 'RES', 'RES',
-];
+import {
+  SUBS_COUNT,
+  RESERVES_COUNT,
+  BENCH_COUNT,
+  BENCH_DRAW_GROUPS,
+  BENCH_SUB_ROLES,
+  type BenchSubRole,
+} from '@/constants/squadLayout';
+import { countPremiumPlayers } from '@/lib/premiumCards';
+import { withDisplayName } from '@/lib/playerNames';
 
 // Squad-rating weights: the starting XI is what counts, substitutes nudge it a
 // little, and reserves have no effect at all.
@@ -110,8 +107,10 @@ type Action =
   | { type: 'SWAP_SLOTS'; a: ActiveSlot; b: ActiveSlot }
   | { type: 'CONFIRM_SQUAD' }
   | { type: 'PICK_MANAGER'; manager: Manager }
+  | { type: 'FINISH_SQUAD_REVIEW' }
   | { type: 'CONFIRM_DRAFT_SCORE'; teamName: string }
   | { type: 'START_MATCH' }
+  | { type: 'QUICK_SIM_TO_REVIEW' }
   | { type: 'SET_MATCH_RESULT'; result: MatchResult }
   | { type: 'CONFIRM_POST_MATCH' }
   | { type: 'RESET' };
@@ -237,21 +236,160 @@ function buildSquad(
   };
 }
 
+function pickBestFromCards(
+  cards: Player[],
+  slot: ActiveSlot,
+  formation: Formation,
+  starterPlayers: (Player | null)[],
+  manager: Manager | null
+): Player {
+  if (cards.length === 1) return cards[0];
+  if (slot.zone === 'starter') {
+    const pos = formation.positions[slot.index];
+    let best = cards[0];
+    let bestChem = -1;
+    const drafted = startersDrafted(starterPlayers, formation);
+    for (const p of cards) {
+      const provisional: DraftedPlayer = {
+        player: p,
+        slot: pos.slot,
+        slotIndex: slot.index,
+        chemistry: 0,
+      };
+      const preview = previewChemistryWithCandidate(drafted, provisional, formation, manager);
+      if (
+        preview.total > bestChem ||
+        (preview.total === bestChem && p.overall > best.overall)
+      ) {
+        bestChem = preview.total;
+        best = p;
+      }
+    }
+    return best;
+  }
+  return cards.reduce((a, b) => (a.overall >= b.overall ? a : b));
+}
+
+function emptySlots(
+  formation: Formation,
+  starterPlayers: (Player | null)[],
+  benchPlayers: (Player | null)[]
+): ActiveSlot[] {
+  const out: ActiveSlot[] = [];
+  for (let i = 0; i < formation.positions.length; i++) {
+    if (!starterPlayers[i]) out.push({ zone: 'starter', index: i });
+  }
+  for (let i = 0; i < benchPlayers.length; i++) {
+    if (!benchPlayers[i]) out.push({ zone: 'bench', index: i });
+  }
+  return out;
+}
+
+/** Auto-fill every remaining draft slot (FIFA quick-sim through the board). */
+function quickSimAllRemaining(state: DraftState): DraftState {
+  if (!state.formation || state.gameState !== GameState.DRAFT) return state;
+
+  const starterPlayers = [...state.starterPlayers];
+  const benchPlayers = [...state.benchPlayers];
+  let awaitingCaptain = state.awaitingCaptain;
+
+  if (awaitingCaptain) {
+    const cards =
+      state.currentCards.length > 0
+        ? state.currentCards
+        : drawCaptainCandidates(
+            state.draftPool,
+            draftedIds(starterPlayers, benchPlayers),
+            countPremiumPlayers([...starterPlayers, ...benchPlayers])
+          );
+    if (!cards.length) return state;
+    const best = cards.reduce((a, b) => (a.overall >= b.overall ? a : b));
+    const slotIndex = findBestSlotForCaptain(best.position, state.formation);
+    starterPlayers[slotIndex] = best;
+    awaitingCaptain = false;
+  }
+
+  let slots = emptySlots(state.formation, starterPlayers, benchPlayers);
+  while (slots.length > 0) {
+    const slot = slots[0];
+    const partial: DraftState = {
+      ...state,
+      starterPlayers,
+      benchPlayers,
+      awaitingCaptain: false,
+    };
+    const cards = drawForSlot(partial, slot);
+    if (!cards.length) break;
+    const pick = pickBestFromCards(
+      cards,
+      slot,
+      state.formation,
+      starterPlayers,
+      state.manager
+    );
+    if (slot.zone === 'starter') starterPlayers[slot.index] = pick;
+    else benchPlayers[slot.index] = pick;
+    slots = emptySlots(state.formation, starterPlayers, benchPlayers);
+  }
+
+  return {
+    ...state,
+    awaitingCaptain: false,
+    starterPlayers,
+    benchPlayers,
+    activeSlot: null,
+    currentCards: [],
+    chemPreview: computeChem(starterPlayers, state.formation, state.manager),
+    squadRating: weightedRating(starterPlayers, benchPlayers),
+  };
+}
+
+function managerChemBoost(manager: Manager, starters: (Player | null)[]): number {
+  const normLeague = (s: string) => (s || '').toLowerCase();
+  let n = 0;
+  for (const p of starters) {
+    if (!p) continue;
+    const sameNation =
+      p.nationalityName.toLowerCase() === manager.nationalityName.toLowerCase();
+    const sameLeague =
+      normLeague(p.leagueName).includes(normLeague(manager.leagueName).split(' ')[0]) ||
+      normLeague(manager.leagueName).includes(normLeague(p.leagueName).split(' ')[0]);
+    if (sameNation || sameLeague) n++;
+  }
+  return n;
+}
+
+function pickBestManager(managers: Manager[], starters: (Player | null)[]): Manager {
+  return managers.reduce((best, m) =>
+    managerChemBoost(m, starters) > managerChemBoost(best, starters) ? m : best
+  );
+}
+
+function premiumDrafted(state: DraftState): number {
+  return countPremiumPlayers([...state.starterPlayers, ...state.benchPlayers]);
+}
+
 function drawForSlot(state: DraftState, slot: ActiveSlot): Player[] {
   if (!state.formation) return [];
   const ids = draftedIds(state.starterPlayers, state.benchPlayers);
+  const premiumCount = premiumDrafted(state);
   if (slot.zone === 'starter') {
     return drawCardsForSlot(
       state.draftPool,
       state.formation,
       slot.index,
       startersDrafted(state.starterPlayers, state.formation),
-      ids
+      ids,
+      premiumCount
     );
   }
-  // Reserves are "blind" wildcards (any position); subs are position-matched.
-  if (slot.index >= SUBS_COUNT) return drawReserveWildcard(state.draftPool, ids);
-  return drawSubCandidates(state.draftPool, BENCH_GROUPS[slot.index] ?? 'CM', ids);
+  // Reserves are wildcards; subs follow FIFA order (GK, 2×DEF, 2×MID, 2×ATT).
+  if (slot.index >= SUBS_COUNT) {
+    return drawReserveWildcard(state.draftPool, ids, premiumCount);
+  }
+  const role = BENCH_SUB_ROLES[slot.index];
+  if (!role) return drawReserveWildcard(state.draftPool, ids, premiumCount);
+  return drawSubCandidates(state.draftPool, role as BenchSubRole, ids, premiumCount);
 }
 
 // ─── Reducer ─────────────────────────────────────────────────────────────────
@@ -283,7 +421,7 @@ function reducer(state: DraftState, action: Action): DraftState {
         starterPlayers: new Array(formation.positions.length).fill(null),
         benchPlayers: new Array(BENCH_COUNT).fill(null),
         activeSlot: null,
-        currentCards: drawCaptainCandidates(state.draftPool, new Set()),
+        currentCards: drawCaptainCandidates(state.draftPool, new Set(), 0),
         chemPreview: { perPlayer: [], links: [], total: 0 },
         squadRating: 0,
         manager: null,
@@ -338,14 +476,6 @@ function reducer(state: DraftState, action: Action): DraftState {
         squadRating: weightedRating(starterPlayers, benchPlayers),
       };
 
-      // Auto-advance to manager draft once all 23 are picked
-      if (isAllFilled(starterPlayers, benchPlayers)) {
-        return {
-          ...next,
-          gameState: GameState.MANAGER_PICK,
-          managerOptions: drawManagers(),
-        };
-      }
       return next;
     }
 
@@ -370,7 +500,7 @@ function reducer(state: DraftState, action: Action): DraftState {
         benchPlayers,
         activeSlot: null,
         currentCards: [],
-        chemPreview: computeChem(starterPlayers, state.formation, null),
+        chemPreview: computeChem(starterPlayers, state.formation, state.manager),
         squadRating: weightedRating(starterPlayers, benchPlayers),
       };
     }
@@ -388,14 +518,27 @@ function reducer(state: DraftState, action: Action): DraftState {
 
     case 'PICK_MANAGER': {
       if (!state.formation) return state;
+      return {
+        ...state,
+        manager: action.manager,
+        gameState: GameState.SQUAD_REVIEW,
+        activeSlot: null,
+        currentCards: [],
+        chemPreview: computeChem(state.starterPlayers, state.formation, action.manager),
+        squadRating: weightedRating(state.starterPlayers, state.benchPlayers),
+      };
+    }
+
+    case 'FINISH_SQUAD_REVIEW': {
+      if (!state.formation || !state.manager) return state;
       const squad = buildSquad(
         state.formation,
         state.starterPlayers,
         state.benchPlayers,
-        action.manager,
+        state.manager,
         state.teamName
       );
-      return { ...state, manager: action.manager, squad, gameState: GameState.DRAFT_SCORE };
+      return { ...state, squad, gameState: GameState.DRAFT_SCORE };
     }
 
     case 'CONFIRM_DRAFT_SCORE': {
@@ -416,6 +559,51 @@ function reducer(state: DraftState, action: Action): DraftState {
 
     case 'START_MATCH':
       return { ...state, gameState: GameState.MATCH_SIM };
+
+    case 'QUICK_SIM_TO_REVIEW': {
+      if (!state.formation) return state;
+      if (state.gameState === GameState.SQUAD_REVIEW) {
+        if (!state.manager) return state;
+        const squad = buildSquad(
+          state.formation,
+          state.starterPlayers,
+          state.benchPlayers,
+          state.manager,
+          state.teamName
+        );
+        return { ...state, squad, gameState: GameState.DRAFT_SCORE };
+      }
+      if (state.gameState === GameState.MANAGER_PICK) {
+        const managers =
+          state.managerOptions.length > 0 ? state.managerOptions : drawManagers();
+        const manager = pickBestManager(managers, state.starterPlayers);
+        return {
+          ...state,
+          manager,
+          gameState: GameState.SQUAD_REVIEW,
+          activeSlot: null,
+          currentCards: [],
+          chemPreview: computeChem(state.starterPlayers, state.formation, manager),
+        };
+      }
+      let filled = state;
+      if (state.gameState === GameState.DRAFT) {
+        filled = quickSimAllRemaining(state);
+      }
+      const managers =
+        filled.managerOptions.length > 0 ? filled.managerOptions : drawManagers();
+      const manager = pickBestManager(managers, filled.starterPlayers);
+      return {
+        ...filled,
+        manager,
+        managerOptions: managers,
+        gameState: GameState.SQUAD_REVIEW,
+        activeSlot: null,
+        currentCards: [],
+        chemPreview: computeChem(filled.starterPlayers, state.formation, manager),
+        squadRating: weightedRating(filled.starterPlayers, filled.benchPlayers),
+      };
+    }
 
     case 'SET_MATCH_RESULT': {
       if (!state.bracket || !state.squad) return state;
@@ -477,10 +665,18 @@ export function useDraft() {
     if (!state.isLoadingPool) return;
     async function loadPool() {
       try {
-        const res = await fetch('/data/players.json');
-        if (!res.ok) throw new Error('players.json not found');
-        const base: Player[] = await res.json();
-        dispatch({ type: 'SET_POOL', pool: [...base, ...LEGENDS] });
+        const [baseRes, specialRes] = await Promise.all([
+          fetch('/data/players.json'),
+          fetch('/data/special-cards.json'),
+        ]);
+        if (!baseRes.ok) throw new Error('players.json not found');
+        const base: Player[] = await baseRes.json();
+        let specials: Player[] = [];
+        if (specialRes.ok) {
+          specials = await specialRes.json();
+        }
+        const pool = [...base, ...specials, ...LEGENDS].map(withDisplayName);
+        dispatch({ type: 'SET_POOL', pool });
       } catch (err) {
         dispatch({
           type: 'POOL_ERROR',
@@ -506,7 +702,9 @@ export function useDraft() {
   );
   const confirmSquad = useCallback(() => dispatch({ type: 'CONFIRM_SQUAD' }), []);
   const pickManager = useCallback((manager: Manager) => dispatch({ type: 'PICK_MANAGER', manager }), []);
+  const finishSquadReview = useCallback(() => dispatch({ type: 'FINISH_SQUAD_REVIEW' }), []);
   const startMatch = useCallback(() => dispatch({ type: 'START_MATCH' }), []);
+  const quickSimToReview = useCallback(() => dispatch({ type: 'QUICK_SIM_TO_REVIEW' }), []);
   const confirmDraftScore = useCallback(
     (teamName: string) => dispatch({ type: 'CONFIRM_DRAFT_SCORE', teamName }),
     []
@@ -542,10 +740,29 @@ export function useDraft() {
 
   const allFilled = isAllFilled(state.starterPlayers, state.benchPlayers);
 
+  const previewSquad = useMemo(() => {
+    if (!state.formation || !state.manager || !allFilled) return null;
+    return buildSquad(
+      state.formation,
+      state.starterPlayers,
+      state.benchPlayers,
+      state.manager,
+      state.teamName
+    );
+  }, [
+    state.formation,
+    state.manager,
+    state.starterPlayers,
+    state.benchPlayers,
+    state.teamName,
+    allFilled,
+  ]);
+
   return {
     ...state,
     allFilled,
-    benchGroups: BENCH_GROUPS,
+    previewSquad,
+    benchGroups: BENCH_DRAW_GROUPS,
     subsCount: SUBS_COUNT,
     reservesCount: RESERVES_COUNT,
     startGame,
@@ -557,8 +774,10 @@ export function useDraft() {
     swapSlots,
     confirmSquad,
     pickManager,
+    finishSquadReview,
     confirmDraftScore,
     startMatch,
+    quickSimToReview,
     setMatchResult,
     confirmPostMatch,
     reset,

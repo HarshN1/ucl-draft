@@ -5,6 +5,7 @@ import {
   findBestSlotForCaptain,
   sampleFormations,
   drawCardsForSlot,
+  drawReserveWildcard,
 } from '@/engine/playerUtils';
 import { FORMATION_433, ALL_FORMATIONS } from './fixtures/formations';
 import { TEST_POOL, HAALAND } from './fixtures/players';
@@ -88,6 +89,23 @@ describe('drawCardsForSlot', () => {
     const cards = drawCardsForSlot(TEST_POOL, FORMATION_433, 9, [], used);
     for (const card of cards) {
       expect(used.has(card.id)).toBe(false);
+    }
+  });
+});
+
+describe('drawReserveWildcard', () => {
+  it('returns up to 5 unique players', () => {
+    const cards = drawReserveWildcard(TEST_POOL, new Set());
+    expect(cards.length).toBeGreaterThan(0);
+    expect(cards.length).toBeLessThanOrEqual(5);
+    expect(new Set(cards.map((p) => p.id)).size).toBe(cards.length);
+  });
+
+  it('never offers more than one goalkeeper per hand', () => {
+    for (let i = 0; i < 30; i++) {
+      const cards = drawReserveWildcard(TEST_POOL, new Set());
+      const gks = cards.filter((p) => p.position === 'GK');
+      expect(gks.length).toBeLessThanOrEqual(1);
     }
   });
 });

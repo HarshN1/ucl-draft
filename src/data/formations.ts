@@ -275,6 +275,96 @@ const DEFS: Def[] = [
   },
 ];
 
+const CM_SLOTS = ['LCM', 'RCM', 'CM', 'CCM'] as const;
+const CB_SLOTS = ['LCB', 'RCB', 'CB'] as const;
+const WING_SLOTS = ['LM', 'RM', 'LW', 'RW', 'LWB', 'RWB'] as const;
+
+/** Remove an undirected link between two slot names. */
+function unlink(links: Links, a: string, b: string): void {
+  if (links[a]) links[a] = links[a].filter((t) => t !== b);
+  if (links[b]) links[b] = links[b].filter((t) => t !== a);
+}
+
+function stripCmToCb(links: Links): void {
+  for (const cm of CM_SLOTS) for (const cb of CB_SLOTS) unlink(links, cm, cb);
+}
+
+function stripCmToWings(links: Links): void {
+  for (const cm of CM_SLOTS) for (const w of WING_SLOTS) unlink(links, cm, w);
+}
+
+/**
+ * Apply documented FUT 15→16 link removals so chemistry webs match in-game FIFA 16.
+ * @see https://fifauteam.com/chemistry-guide-fifa-16-ultimate-team/
+ */
+function applyFut16LinkRules(name: string, label: string, raw: Links): Links {
+  const links: Links = Object.fromEntries(
+    Object.entries(raw).map(([slot, targets]) => [slot, [...targets]])
+  );
+
+  if (name === '4-3-3') {
+    stripCmToCb(links);
+    if (label === 'False 9') {
+      unlink(links, 'CDM', 'LCB');
+      unlink(links, 'CDM', 'RCB');
+    }
+  }
+
+  if (name.startsWith('3-4') || name.startsWith('5-2')) {
+    stripCmToCb(links);
+  }
+
+  if (name === '5-3-2') {
+    stripCmToCb(links);
+  }
+
+  if (name === '4-1-2-1-2' && label === 'Narrow Diamond') {
+    // CDM↔CB stays; side CMs must not bridge to centre-backs.
+    unlink(links, 'LCM', 'LCB');
+    unlink(links, 'RCM', 'RCB');
+  }
+
+  if (name === '4-3-2-1') {
+    unlink(links, 'CM', 'LCB');
+    unlink(links, 'CM', 'RCB');
+    unlink(links, 'LCM', 'LCB');
+    unlink(links, 'RCM', 'RCB');
+  }
+
+  if (name === '4-3-1-2') {
+    unlink(links, 'CAM', 'LCM');
+    unlink(links, 'CAM', 'RCM');
+    unlink(links, 'CM', 'LCB');
+    unlink(links, 'CM', 'RCB');
+  }
+
+  if (name === '4-5-1') {
+    stripCmToWings(links);
+    if (label === 'Attack') {
+      unlink(links, 'CM', 'LM');
+      unlink(links, 'CM', 'RM');
+    }
+    if (label === 'Flat') {
+      unlink(links, 'CCM', 'LM');
+      unlink(links, 'CCM', 'RM');
+    }
+  }
+
+  if (name === '4-2-3-1' && label === 'Wide') {
+    // CAM must not link into the back line.
+    for (const cb of CB_SLOTS) unlink(links, 'CAM', cb);
+  }
+
+  if (name === '4-1-2-1-2' && label === 'Wide Diamond') {
+    unlink(links, 'LM', 'LCB');
+    unlink(links, 'LM', 'RCB');
+    unlink(links, 'RM', 'LCB');
+    unlink(links, 'RM', 'RCB');
+  }
+
+  return links;
+}
+
 function build(d: Def): Formation {
   const positions: FormationPosition[] = Object.entries(d.pos).map(([slot, [x, y]]) => ({
     slot,
@@ -282,7 +372,8 @@ function build(d: Def): Formation {
     x,
     y,
   }));
-  return { name: d.name, label: d.label, positions, links: d.links };
+  const links = applyFut16LinkRules(d.name, d.label, d.links);
+  return { name: d.name, label: d.label, positions, links };
 }
 
 export const FORMATIONS: Formation[] = DEFS.map(build);

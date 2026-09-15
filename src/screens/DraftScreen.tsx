@@ -1,17 +1,22 @@
 'use client';
 
 import { useState } from 'react';
-import type { Player, Formation, ChemistryPreview } from '@/types';
+import { clsx } from 'clsx';
+import type { Player, Formation, ChemistryPreview, Squad } from '@/types';
 import type { ActiveSlot } from '@/hooks/useDraft';
 import { SquadBoard } from '@/components/draft/SquadBoard';
 import { CardChooser } from '@/components/draft/CardChooser';
+import { Button } from '@/components/ui/Button';
+import { DraftSideAction } from '@/components/draft/DraftSideAction';
+import { SquadTab } from '@/components/draft/SquadTab';
+import { SquadShareActions } from '@/components/draft/SquadShareActions';
 
 interface DraftScreenProps {
   formation: Formation;
   awaitingCaptain: boolean;
   starterPlayers: (Player | null)[];
   benchPlayers: (Player | null)[];
-  benchGroups: string[];
+  benchGroups: ReadonlyArray<string>;
   subsCount: number;
   activeSlot: ActiveSlot | null;
   currentCards: Player[];
@@ -23,6 +28,13 @@ interface DraftScreenProps {
   onSelectSlot: (s: ActiveSlot) => void;
   onPickPlayer: (p: Player) => void;
   onSwapSlots: (a: ActiveSlot, b: ActiveSlot) => void;
+  onConfirmSquad?: () => void;
+  onFinishReview?: () => void;
+  onQuickSimToReview?: () => void;
+  allFilled?: boolean;
+  reviewMode?: boolean;
+  managerName?: string;
+  shareSquad?: Squad | null;
   onPlayClick?: () => void;
   onPlayPick?: () => void;
 }
@@ -30,10 +42,15 @@ interface DraftScreenProps {
 function Counter({ label, value, color }: { label: string; value: number; color: string }) {
   return (
     <div className="stat-pod text-center">
-      <div className="font-display font-bold text-4xl leading-none" style={{ color }}>
+      <div
+        className="font-display font-bold leading-none draft-stat-value"
+        style={{ color }}
+      >
         {value}
       </div>
-      <div className="font-display text-[10px] tracking-widest text-white/40 uppercase mt-1">{label}</div>
+      <div className="font-display tracking-widest text-white/40 uppercase mt-0.5 draft-stat-label">
+        {label}
+      </div>
     </div>
   );
 }
@@ -44,15 +61,36 @@ function sameSlot(a: ActiveSlot, b: ActiveSlot) {
 
 export function DraftScreen(props: DraftScreenProps) {
   const {
-    formation, awaitingCaptain, starterPlayers, benchPlayers, benchGroups, subsCount,
-    activeSlot, currentCards, chemPreview, squadRating, filledCount,
-    getChemPreviewForCandidate, onPickCaptain, onSelectSlot,
-    onPickPlayer, onSwapSlots, onPlayClick, onPlayPick,
+    formation,
+    awaitingCaptain,
+    starterPlayers,
+    benchPlayers,
+    benchGroups,
+    subsCount,
+    activeSlot,
+    currentCards,
+    chemPreview,
+    squadRating,
+    filledCount,
+    getChemPreviewForCandidate,
+    onPickCaptain,
+    onSelectSlot,
+    onPickPlayer,
+    onSwapSlots,
+    onConfirmSquad,
+    onQuickSimToReview,
+    allFilled,
+    reviewMode,
+    managerName,
+    shareSquad,
+    onPlayClick,
+    onPlayPick,
   } = props;
 
   const [draggingSlot, setDraggingSlot] = useState<ActiveSlot | null>(null);
   const [swapSource, setSwapSource] = useState<ActiveSlot | null>(null);
-  const picking = awaitingCaptain || !!activeSlot;
+  const [squadPreview, setSquadPreview] = useState(false);
+  const picking = !reviewMode && (awaitingCaptain || !!activeSlot);
 
   const chemColor =
     chemPreview.total > 75 ? '#16d36a' : chemPreview.total >= 50 ? '#e0a000' : '#d63a3a';
@@ -99,6 +137,19 @@ export function DraftScreen(props: DraftScreenProps) {
     setSwapSource(null);
   }
 
+  const benchRole = activeSlot?.zone === 'bench' ? benchGroups[activeSlot.index] : '';
+  const isReservePick = benchRole === 'RES';
+  const activeLabel =
+    activeSlot?.zone === 'starter'
+      ? formation.positions[activeSlot.index]?.slot
+      : activeSlot?.zone === 'bench'
+        ? isReservePick
+          ? 'Reserve'
+          : 'Substitute'
+        : '';
+  const activeGroup =
+    activeSlot?.zone === 'starter' ? formation.positions[activeSlot.index]?.positionGroup : undefined;
+
   function handlePickCaptain(p: Player) {
     onPlayPick?.();
     onPickCaptain(p);
@@ -109,38 +160,60 @@ export function DraftScreen(props: DraftScreenProps) {
     onPickPlayer(p);
   }
 
-  const activeLabel =
-    activeSlot?.zone === 'starter'
-      ? formation.positions[activeSlot.index]?.slot
-      : activeSlot
-      ? benchGroups[activeSlot.index]
-      : '';
-  const activeGroup =
-    activeSlot?.zone === 'starter'
-      ? formation.positions[activeSlot.index]?.positionGroup
-      : activeSlot
-      ? benchGroups[activeSlot.index]
-      : undefined;
+  const showQuickSim = !reviewMode && !!onQuickSimToReview;
+  const showSubmit = reviewMode && !!onQuickSimToReview;
+  const pickTitle = awaitingCaptain ? 'Pick Captain' : `Pick ${activeLabel}`;
 
   return (
-    <div className="h-full flex flex-col px-4 py-3 overflow-hidden" onDragEnd={() => setDraggingSlot(null)}>
-      <div className="flex items-center justify-between max-w-4xl mx-auto w-full mb-2 shrink-0">
+    <div
+      className="relative h-full w-full flex flex-col overflow-hidden draft-screen"
+      onDragEnd={() => setDraggingSlot(null)}
+    >
+      {showQuickSim && (
+        <DraftSideAction
+          label="Quick Sim"
+          onClick={() => {
+            onPlayClick?.();
+            onQuickSimToReview!();
+          }}
+        />
+      )}
+      {showSubmit && (
+        <DraftSideAction
+          label="Submit"
+          variant="submit"
+          onClick={() => {
+            onPlayClick?.();
+            onQuickSimToReview!();
+          }}
+        />
+      )}
+
+      <div className="flex items-center justify-between w-full mb-[clamp(2px,0.8cqh,8px)] shrink-0 gap-2 px-[clamp(4px,2cqw,16px)]">
         <Counter label="Rating" value={squadRating} color="#ffffff" />
-        <div className="text-center">
-          <div className="font-display text-white/30 text-[10px] uppercase tracking-widest">
+        <div className="text-center min-w-0 flex-1">
+          <div className="font-display text-white/30 uppercase tracking-widest truncate draft-header-sub">
             {formation.name}
+            {reviewMode && managerName ? ` · ${managerName}` : ''}
           </div>
-          <div className="font-display font-bold text-2xl text-accent">{filledCount}/23 DRAFTED</div>
+          <div className="font-display font-bold text-accent draft-header-main">
+            {reviewMode ? 'FINAL SQUAD' : `${filledCount}/23`}
+          </div>
         </div>
         <Counter label="Chemistry" value={chemPreview.total} color={chemColor} />
       </div>
 
-      <div className="max-w-xl mx-auto w-full flex-1 min-h-0 flex flex-col justify-center overflow-visible">
+      <div
+        className={clsx(
+          'flex-1 min-h-0 flex flex-col justify-center overflow-hidden w-full mx-auto draft-board-wrap',
+          picking && !squadPreview && 'draft-board--dimmed',
+          picking && squadPreview && 'draft-board--focused'
+        )}
+      >
         <SquadBoard
           formation={formation}
           starterPlayers={starterPlayers}
           benchPlayers={benchPlayers}
-          benchGroups={benchGroups}
           subsCount={subsCount}
           chem={chemPreview}
           activeSlot={activeSlot}
@@ -156,48 +229,86 @@ export function DraftScreen(props: DraftScreenProps) {
       </div>
 
       {!picking && (
-        <div className="text-center mt-4 font-body text-white/45 text-sm">
-          {swapSource ? (
-            <>
-              Tap another player to <span className="text-gold">swap</span> — tap again to cancel
-            </>
-          ) : (
-            <>
-              Tap an <span className="text-accent">empty slot</span> to draft ·{' '}
-              <span className="text-gold">tap or drag</span> players to rearrange
-            </>
+        <div className="shrink-0 mt-1 flex flex-col items-center gap-2 pb-[env(safe-area-inset-bottom)] px-2">
+          {reviewMode && shareSquad && (
+            <SquadShareActions squad={shareSquad} resultLabel="Draft" compact />
           )}
+          {!reviewMode && allFilled && onConfirmSquad && (
+            <Button
+              variant="gold"
+              size="md"
+              onClick={() => {
+                onPlayClick?.();
+                onConfirmSquad();
+              }}
+              className="font-display tracking-widest uppercase text-sm"
+            >
+              △ Complete Squad
+            </Button>
+          )}
+          <p className="text-center font-body text-white/40 leading-snug px-2 draft-hint">
+            {swapSource ? (
+              <>Tap another player to <span className="text-gold">swap</span></>
+            ) : reviewMode ? (
+              <>Rearrange, then <span className="text-gold">Submit</span> on the right</>
+            ) : allFilled ? (
+              <>All 23 picked — <span className="text-gold">Complete Squad</span></>
+            ) : (
+              <>Click empty slot to draft · drag to rearrange</>
+            )}
+          </p>
         </div>
       )}
 
       {picking && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center">
-          <div className="absolute inset-0 draft-overlay" />
-          <div className="relative z-10 w-full" style={{ perspective: '1200px' }}>
-            <div className="w-full border-y-2 border-gold/50 bg-primary/80 py-4 text-center">
-              <div className="font-display text-white/40 text-[10px] uppercase tracking-[0.35em]">
-                {awaitingCaptain ? 'Choose your captain' : `Draft your ${activeLabel}`}
-              </div>
-              <div className="font-display font-bold uppercase text-3xl text-gold mt-1 text-glow-gold">
-                {awaitingCaptain ? '⚡ Pick Your Captain' : `Pick ${activeLabel}`}
-              </div>
-            </div>
+        <>
+          <div
+            className={clsx(
+              'absolute inset-0 z-30 pointer-events-none transition-opacity duration-200',
+              squadPreview ? 'draft-scrim--peek' : 'draft-scrim'
+            )}
+            aria-hidden
+          />
 
-            <div className="mt-8 flex justify-center px-1">
-              {awaitingCaptain ? (
-                <CardChooser cards={currentCards} onPick={handlePickCaptain} />
-              ) : (
-                <CardChooser
-                  cards={currentCards}
-                  onPick={handlePickPlayer}
-                  chemForCandidate={getChemPreviewForCandidate}
-                  baseChem={chemPreview.total}
-                  slotGroup={activeGroup}
-                />
-              )}
+          <SquadTab
+            active={squadPreview}
+            onActivate={() => setSquadPreview(true)}
+            onDeactivate={() => setSquadPreview(false)}
+            onToggle={() => setSquadPreview((v) => !v)}
+          />
+
+          {!squadPreview && (
+            <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 z-40 draft-pick-band">
+              <div className="draft-pick-band__inner">
+                <div className="draft-pick-band__title font-display font-bold uppercase text-gold text-center">
+                  {pickTitle}
+                </div>
+                <div className="draft-pick-band__cards">
+                  {awaitingCaptain ? (
+                    <CardChooser cards={currentCards} onPick={handlePickCaptain} fluid />
+                  ) : (
+                    <CardChooser
+                      cards={currentCards}
+                      onPick={handlePickPlayer}
+                      chemForCandidate={getChemPreviewForCandidate}
+                      baseChem={chemPreview.total}
+                      slotGroup={activeGroup}
+                      fluid
+                    />
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          )}
+
+          {squadPreview && (
+            <div className="absolute bottom-[clamp(8px,2cqh,20px)] left-0 right-0 z-40 text-center pointer-events-none">
+              <span className="font-display text-[10px] uppercase tracking-[0.3em] text-white/45">
+                Release Squad to pick
+              </span>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

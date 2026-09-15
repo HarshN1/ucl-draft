@@ -5,7 +5,9 @@ import type { Squad, DraftedPlayer } from '@/types';
 import { getDraftScoreTier } from '@/types';
 import { PlayerCard } from '@/components/draft/PlayerCard';
 import { Button } from '@/components/ui/Button';
+import { SquadShareActions } from '@/components/draft/SquadShareActions';
 import { proxied } from '@/lib/img';
+import { normalizeTeamName } from '@/lib/squadShare';
 
 interface DraftScoreScreenProps {
   squad: Squad;
@@ -23,33 +25,36 @@ const TIER_COLOR: Record<string, string> = {
   'Good Draft': 'rgba(255,255,255,0.7)',
 };
 
+const PLACEHOLDER = 'FK Bodø/Glimt';
+
 function avg(players: DraftedPlayer[]) {
   if (!players.length) return 0;
   return Math.round(players.reduce((s, p) => s + p.player.overall, 0) / players.length);
 }
 
 function RatingRing({ label, value, color }: { label: string; value: number; color: string }) {
-  const r = 26;
+  const r = 22;
   const c = 2 * Math.PI * r;
   const pct = Math.min(100, value) / 100;
   return (
-    <div className="flex flex-col items-center gap-1">
-      <svg width="68" height="68" viewBox="0 0 68 68">
-        <circle cx="34" cy="34" r={r} fill="none" stroke="#ffffff14" strokeWidth="6" />
+    <div className="flex flex-col items-center gap-0.5">
+      <svg width="52" height="52" viewBox="0 0 52 52">
+        <circle cx="26" cy="26" r={r} fill="none" stroke="#ffffff14" strokeWidth="5" />
         <circle
-          cx="34" cy="34" r={r} fill="none" stroke={color} strokeWidth="6" strokeLinecap="round"
-          strokeDasharray={`${c * pct} ${c}`} transform="rotate(-90 34 34)"
+          cx="26" cy="26" r={r} fill="none" stroke={color} strokeWidth="5" strokeLinecap="round"
+          strokeDasharray={`${c * pct} ${c}`} transform="rotate(-90 26 26)"
         />
-        <text x="34" y="40" textAnchor="middle" fontSize="20" fontWeight="700" fill="#fff" className="font-display">
+        <text x="26" y="31" textAnchor="middle" fontSize="15" fontWeight="700" fill="#fff" className="font-display">
           {value}
         </text>
       </svg>
-      <span className="font-display text-[10px] uppercase tracking-widest text-white/50">{label}</span>
+      <span className="font-display text-[8px] uppercase tracking-widest text-white/50">{label}</span>
     </div>
   );
 }
 
 export function DraftScoreScreen({ squad, onContinue }: DraftScoreScreenProps) {
+  const [teamName, setTeamName] = useState('');
   const [submitted, setSubmitted] = useState(false);
 
   const byOvr = (a: DraftedPlayer, b: DraftedPlayer) => b.player.overall - a.player.overall;
@@ -64,83 +69,88 @@ export function DraftScoreScreen({ squad, onContinue }: DraftScoreScreenProps) {
 
   const tier = getDraftScoreTier(squad.draftScore);
   const tierColor = TIER_COLOR[tier];
+  const displayName = normalizeTeamName(teamName);
 
   function handleSubmit() {
     setSubmitted(true);
-    setTimeout(() => onContinue(squad.teamName), 250);
+    setTimeout(() => onContinue(displayName), 250);
   }
 
   return (
-    <div className="h-full overflow-y-auto px-4 py-6 flex flex-col items-center">
-      <div className="w-full max-w-3xl flex flex-col items-center gap-5">
+    <div className="h-full overflow-hidden px-3 py-2 flex flex-col items-center justify-center">
+      <div className="w-full max-w-3xl flex flex-col items-center gap-2 min-h-0">
         <div className="text-center shrink-0">
-          <div className="font-display text-gold text-xs uppercase tracking-[0.35em]">FUT Draft Summary</div>
-          <h2 className="font-display font-bold text-3xl text-white mt-1">Your Squad</h2>
+          <div className="font-display text-gold text-[9px] uppercase tracking-[0.35em]">FUT Draft Summary</div>
+          <h2 className="font-display font-bold text-xl md:text-2xl text-white">Your Squad</h2>
         </div>
 
-        {/* Chemistry + Rating = Squad Rating */}
-        <div className="flex items-center justify-center gap-4 sm:gap-6">
+        <div className="flex items-center justify-center gap-3 sm:gap-5 shrink-0">
           <div className="text-center">
-            <div className="font-display font-bold text-4xl text-ucl-green">{squad.chemistry}</div>
-            <div className="font-display text-[9px] tracking-widest text-white/40 uppercase">Chemistry</div>
+            <div className="font-display font-bold text-2xl md:text-3xl text-ucl-green">{squad.chemistry}</div>
+            <div className="font-display text-[8px] tracking-widest text-white/40 uppercase">Chem</div>
           </div>
-          <span className="font-display text-3xl text-white/40">+</span>
+          <span className="font-display text-xl text-white/40">+</span>
           <div className="text-center">
-            <div className="font-display font-bold text-4xl text-white">{squad.ovrAvg}</div>
-            <div className="font-display text-[9px] tracking-widest text-white/40 uppercase">Rating</div>
+            <div className="font-display font-bold text-2xl md:text-3xl text-white">{squad.ovrAvg}</div>
+            <div className="font-display text-[8px] tracking-widest text-white/40 uppercase">Rating</div>
           </div>
-          <span className="font-display text-3xl text-white/40">=</span>
+          <span className="font-display text-xl text-white/40">=</span>
           <div className="text-center">
-            <div className="font-display font-bold text-5xl" style={{ color: tierColor }}>{squad.draftScore}</div>
-            <div className="font-display text-[9px] tracking-widest text-white/40 uppercase">Draft Score</div>
+            <div className="font-display font-bold text-3xl md:text-4xl" style={{ color: tierColor }}>{squad.draftScore}</div>
+            <div className="font-display text-[8px] tracking-widest text-white/40 uppercase">Draft Score</div>
           </div>
         </div>
-        <div className="font-display font-bold -mt-3" style={{ color: tierColor }}>{tier}</div>
+        <div className="font-display font-bold text-xs -mt-1 shrink-0" style={{ color: tierColor }}>{tier}</div>
 
-        {/* Line rating gauges */}
-        <div className="flex items-center justify-center gap-8">
+        <div className="flex items-center justify-center gap-5 shrink-0">
           <RatingRing label="Attack" value={attack} color="#ff5d6c" />
-          <RatingRing label="Midfield" value={midfield} color="#ffd700" />
-          <RatingRing label="Defense" value={defense} color="#00d4ff" />
+          <RatingRing label="Mid" value={midfield} color="#ffd700" />
+          <RatingRing label="Def" value={defense} color="#00d4ff" />
         </div>
 
-        {/* Top players */}
-        <div className="flex flex-wrap justify-center gap-8 w-full">
+        <div className="flex flex-wrap justify-center gap-4 w-full shrink-0 scale-[0.88] origin-center">
           {attackers.length > 0 && (
-            <div className="flex flex-col items-center gap-2">
-              <div className="font-display text-[11px] tracking-[0.25em] text-ucl-red uppercase">Top Attackers</div>
-              <div className="flex gap-2">
-                {attackers.map((dp) => <PlayerCard key={dp.player.id} player={dp.player} size="sm" />)}
+            <div className="flex flex-col items-center gap-1">
+              <div className="font-display text-[9px] tracking-[0.2em] text-ucl-red uppercase">Attack</div>
+              <div className="flex gap-1">
+                {attackers.map((dp) => <PlayerCard key={dp.player.id} player={dp.player} size="xs" />)}
               </div>
             </div>
           )}
           {defenders.length > 0 && (
-            <div className="flex flex-col items-center gap-2">
-              <div className="font-display text-[11px] tracking-[0.25em] text-accent uppercase">Top Defenders</div>
-              <div className="flex gap-2">
-                {defenders.map((dp) => <PlayerCard key={dp.player.id} player={dp.player} size="sm" />)}
+            <div className="flex flex-col items-center gap-1">
+              <div className="font-display text-[9px] tracking-[0.2em] text-accent uppercase">Defense</div>
+              <div className="flex gap-1">
+                {defenders.map((dp) => <PlayerCard key={dp.player.id} player={dp.player} size="xs" />)}
               </div>
             </div>
           )}
         </div>
 
-        {/* Locked team identity + enter */}
-        <div className="w-full max-w-sm flex flex-col items-center gap-3 pb-4">
-          <div className="flex items-center justify-center gap-3 border-2 border-white/15 bg-primary/70 px-5 py-3 w-full">
+        <SquadShareActions squad={squad} resultLabel="Draft" compact />
+
+        <div className="w-full max-w-sm flex flex-col items-center gap-2 shrink-0 pb-[env(safe-area-inset-bottom)]">
+          <div className="flex items-center gap-2 border-2 border-white/15 bg-primary/70 px-3 py-2 w-full">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={proxied('https://cdn.sofifa.net/teams/918/60.png')}
               alt="FK Bodø/Glimt"
-              className="h-9 w-9 object-contain"
+              className="h-7 w-7 object-contain shrink-0"
             />
-            <div className="text-left">
-              <div className="font-display text-[9px] uppercase tracking-[0.25em] text-white/40">Your Club</div>
-              <div className="font-display font-bold uppercase tracking-wide text-white text-lg leading-none">
-                {squad.teamName}
-              </div>
+            <div className="flex-1 min-w-0">
+              <div className="font-display text-[8px] uppercase tracking-[0.2em] text-white/40">Club Name</div>
+              <input
+                type="text"
+                value={teamName}
+                onChange={(e) => setTeamName(e.target.value.slice(0, 40))}
+                placeholder={PLACEHOLDER}
+                className="w-full bg-transparent font-display font-bold uppercase tracking-wide text-white text-base leading-none outline-none placeholder:text-white/25 placeholder:font-normal"
+                maxLength={40}
+                aria-label="Team name"
+              />
             </div>
           </div>
-          <Button variant="primary" size="lg" onClick={handleSubmit} disabled={submitted} className="w-full">
+          <Button variant="primary" size="md" onClick={handleSubmit} disabled={submitted} className="w-full">
             Enter the UCL Draw →
           </Button>
         </div>

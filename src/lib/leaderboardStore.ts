@@ -1,4 +1,4 @@
-import type { LeaderboardEntry } from '@/types';
+import type { LeaderboardEntry, SquadSnapshot } from '@/types';
 import { getRedis } from '@/lib/kv';
 
 export const LEADERBOARD_KEY = 'leaderboard:global';
@@ -7,6 +7,7 @@ export const MAX_ENTRIES = 100;
 const MAX_TEAM_NAME = 40;
 const MAX_FORMATION = 30;
 const MAX_RESULT = 60;
+const MAX_SQUAD_BYTES = 48_000;
 const VALID_RESULTS = new Set([
   'Champions',
   'Won Round of 16',
@@ -24,8 +25,16 @@ export function scoreFor(draftScore: number, timestamp: number): number {
   return draftScore * 1e13 + (9_999_999_999_999 - timestamp);
 }
 
+function validateSquad(squad: SquadSnapshot | undefined): string | null {
+  if (!squad) return null;
+  const json = JSON.stringify(squad);
+  if (json.length > MAX_SQUAD_BYTES) return 'squad snapshot too large';
+  if (!squad.formationName || !squad.starters?.length) return 'invalid squad snapshot';
+  return null;
+}
+
 export function validateEntry(
-  entry: Pick<LeaderboardEntry, 'teamName' | 'formation' | 'draftScore' | 'result' | 'timestamp'>
+  entry: Pick<LeaderboardEntry, 'teamName' | 'formation' | 'draftScore' | 'result' | 'timestamp' | 'squad' | 'shareUrl'>
 ): string | null {
   const teamName = entry.teamName?.trim();
   if (!teamName) return 'teamName is required';
@@ -48,6 +57,11 @@ export function validateEntry(
     return 'invalid timestamp';
   }
 
+  const squadErr = validateSquad(entry.squad);
+  if (squadErr) return squadErr;
+
+  if (entry.shareUrl && entry.shareUrl.length > 2048) return 'shareUrl too long';
+
   return null;
 }
 
@@ -61,6 +75,8 @@ export async function addEntry(
     draftScore: entry.draftScore,
     result: entry.result.trim(),
     timestamp: entry.timestamp,
+    squad: entry.squad,
+    shareUrl: entry.shareUrl?.trim(),
   };
 
   const err = validateEntry(full);

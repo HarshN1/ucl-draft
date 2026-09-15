@@ -9,73 +9,85 @@ import { positionCategory } from '@/engine/chemistryEngine';
 interface CardChooserProps {
   cards: Player[];
   onPick: (player: Player) => void;
-  /** Optional: resulting team chemistry if this candidate is chosen (starters only). */
   chemForCandidate?: (player: Player) => number;
   baseChem?: number;
-  /** Slot group being drafted — colours each card's position badge by fit. */
   slotGroup?: string;
+  /** Scale cards to fit narrow containers (uses container query units). */
+  fluid?: boolean;
 }
 
-export function CardChooser({ cards, onPick, chemForCandidate, baseChem = 0, slotGroup }: CardChooserProps) {
+export function CardChooser({
+  cards,
+  onPick,
+  chemForCandidate,
+  baseChem = 0,
+  slotGroup,
+  fluid,
+}: CardChooserProps) {
   const [picked, setPicked] = useState<number | null>(null);
-  const [hovered, setHovered] = useState<number | null>(null);
 
   useEffect(() => {
     setPicked(null);
-    setHovered(null);
   }, [cards]);
 
   function handle(p: Player, idx: number) {
     if (picked !== null) return;
     setPicked(idx);
-    setTimeout(() => onPick(p), 250);
+    setTimeout(() => onPick(p), fluid ? 150 : 200);
   }
 
+  const cardSize = fluid ? 'sm' : 'md';
+  const showChem = !!chemForCandidate;
+
   return (
-    <div className="flex flex-nowrap items-start justify-center gap-1 max-w-full overflow-x-auto pb-1 px-1">
-      {cards.map((card, idx) => {
-        const isPicked = picked === idx;
-        const isOther = picked !== null && picked !== idx;
-        const delta =
-          chemForCandidate && hovered === idx ? chemForCandidate(card) - baseChem : null;
-        return (
-          <div
-            key={card.id}
-            onMouseEnter={() => setHovered(idx)}
-            onMouseLeave={() => setHovered(null)}
-            className={clsx(
-              'flex flex-col items-center gap-1 transition-transform duration-75',
-              isOther && 'opacity-30 scale-90',
-              isPicked && 'animate-card-flip'
-            )}
-          >
-            {/* cascading 3D flip + sheen sweep, left → right */}
-            <div className="relative animate-pack-flip" style={{ animationDelay: `${idx * 90}ms` }}>
-              <PlayerCard
-                player={card}
-                isSelected={isPicked}
-                onClick={() => handle(card, idx)}
-                size="md"
-                posFit={slotGroup ? positionCategory(card.position, slotGroup) : undefined}
-              />
-              <div className="card-sheen" style={{ ['--sheen-delay' as string]: `${idx * 90 + 380}ms` } as CSSProperties} />
-            </div>
-            <div className="h-4">
-              {delta !== null && (
-                <span
-                  className={clsx(
-                    'font-display text-[11px] font-bold',
-                    delta > 0 ? 'text-ucl-green' : delta < 0 ? 'text-ucl-red' : 'text-white/40'
-                  )}
-                >
-                  {delta > 0 ? '+' : ''}
-                  {delta} chem
-                </span>
+    <div className="w-full overflow-hidden px-[clamp(4px,2cqw,16px)]">
+      <div
+        className="flex flex-nowrap items-end justify-center w-full draft-card-row"
+        style={{ gap: fluid ? 'clamp(4px, 1.5cqw, 14px)' : undefined }}
+      >
+        {cards.map((card, idx) => {
+          const isPicked = picked === idx;
+          const isOther = picked !== null && picked !== idx;
+          const delta = chemForCandidate ? chemForCandidate(card) - baseChem : null;
+          return (
+            <div
+              key={card.id}
+              className={clsx(
+                'flex flex-col items-center gap-0.5 transition-transform duration-75 draft-card-slot',
+                isOther && 'opacity-30 scale-90',
+                isPicked && 'animate-card-flip'
               )}
+            >
+              <div className="relative animate-pack-flip" style={{ animationDelay: `${idx * 90}ms` }}>
+                <PlayerCard
+                  player={card}
+                  isSelected={isPicked}
+                  onClick={() => handle(card, idx)}
+                  size={cardSize}
+                  posFit={slotGroup ? positionCategory(card.position, slotGroup) : undefined}
+                />
+                <div
+                  className="card-sheen"
+                  style={{ ['--sheen-delay' as string]: `${idx * 90 + 380}ms` } as CSSProperties}
+                />
+              </div>
+              <div className="h-[clamp(12px,2.5cqh,18px)]">
+                {delta !== null && (showChem || delta !== 0) && (
+                  <span
+                    className={clsx(
+                      'font-display font-bold draft-chem-delta',
+                      delta > 0 ? 'text-ucl-green' : delta < 0 ? 'text-ucl-red' : 'text-white/40'
+                    )}
+                  >
+                    {delta > 0 ? '+' : ''}
+                    {delta} chem
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }

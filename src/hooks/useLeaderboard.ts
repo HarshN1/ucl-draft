@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import type { LeaderboardEntry } from '@/types';
 
 const STORAGE_KEY = 'ucl-draft-leaderboard';
-const LOCAL_MAX_ENTRIES = 10;
+const LOCAL_MAX_ENTRIES = 25;
 
 export type LeaderboardMode = 'global' | 'local';
 
@@ -22,31 +22,38 @@ function writeLocalEntries(entries: LeaderboardEntry[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
   } catch {
-    // localStorage unavailable — degrade silently
+    // degrade silently
   }
 }
 
-function saveLocalEntry(
-  teamName: string,
-  formation: string,
-  draftScore: number,
-  result: string
-): LeaderboardEntry[] {
-  const newEntry: LeaderboardEntry = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    teamName,
-    formation,
-    draftScore,
-    result,
-    timestamp: Date.now(),
-  };
-
-  const updated = [...readLocalEntries(), newEntry]
-    .sort((a, b) => b.draftScore - a.draftScore)
+function upsertLocalEntry(entry: LeaderboardEntry): LeaderboardEntry[] {
+  const existing = readLocalEntries().filter((e) => e.id !== entry.id);
+  const updated = [...existing, entry]
+    .sort((a, b) => b.draftScore - a.draftScore || b.timestamp - a.timestamp)
     .slice(0, LOCAL_MAX_ENTRIES);
-
   writeLocalEntries(updated);
   return updated;
+}
+
+function saveLocalEntry(input: Omit<LeaderboardEntry, 'id' | 'timestamp'>): LeaderboardEntry {
+  const newEntry: LeaderboardEntry = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    timestamp: Date.now(),
+    ...input,
+  };
+  upsertLocalEntry(newEntry);
+  return newEntry;
+}
+
+function mergeEntries(global: LeaderboardEntry[], local: LeaderboardEntry[]): LeaderboardEntry[] {
+  const byId = new Map<string, LeaderboardEntry>();
+  for (const e of [...global, ...local]) {
+    const prev = byId.get(e.id);
+    if (!prev || e.timestamp > prev.timestamp) byId.set(e.id, e);
+  }
+  return Array.from(byId.values())
+    .sort((a, b) => b.draftScore - a.draftScore || b.timestamp - a.timestamp)
+    .slice(0, 10);
 }
 
 async function fetchFromApi(limit = 10): Promise<{
@@ -62,22 +69,25 @@ async function fetchFromApi(limit = 10): Promise<{
   }
 
   const data = (await res.json()) as LeaderboardEntry[];
-  if (mode === 'local' && data.length === 0) {
-    return { entries: readLocalEntries(), mode: 'local' };
+  const local = readLocalEntries();
+
+  if (mode === 'global') {
+    if (data.length === 0 && local.length > 0) {
+      return { entries: local, mode: 'local' };
+    }
+    return { entries: mergeEntries(data, local), mode: 'global' };
   }
-  return { entries: data, mode };
+
+  return { entries: local.length ? local : data, mode: 'local' };
 }
 
 async function postToApi(
-  teamName: string,
-  formation: string,
-  draftScore: number,
-  result: string
-): Promise<{ ok: boolean; mode: LeaderboardMode; entries?: LeaderboardEntry[] }> {
+  entry: Omit<LeaderboardEntry, 'id' | 'timestamp'>
+): Promise<{ ok: boolean; mode: LeaderboardMode; saved?: LeaderboardEntry }> {
   const res = await fetch('/api/leaderboard', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ teamName, formation, draftScore, result }),
+    body: JSON.stringify({ ...entry, timestamp: Date.now() }),
   });
 
   const modeHeader = res.headers.get('X-Leaderboard-Mode');
@@ -95,8 +105,19 @@ async function postToApi(
   }
 
   const saved = (await res.json()) as LeaderboardEntry;
-  return { ok: true, mode, entries: [saved] };
+  return { ok: true, mode, saved };
 }
+
+export interface SaveLeaderboardInput {
+  teamName: string;
+  formation: string;
+  draftScore: number;
+  result: string;
+  squad?: import('@/types').SquadSnapshot;
+  shareUrl?: string;
+}
+
+export type SaveResult = { mode: LeaderboardMode; entry: LeaderboardEntry };
 
 export function useLeaderboard() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
@@ -115,7 +136,7 @@ export function useLeaderboard() {
     } catch {
       setEntries(readLocalEntries());
       setMode('local');
-      setError('Could not load global leaderboard — showing local entries.');
+      setError('Could not load global leaderboard — showing saved entries on this device.');
     } finally {
       setLoading(false);
     }
@@ -126,34 +147,29 @@ export function useLeaderboard() {
   }, [refresh]);
 
   const saveEntry = useCallback(
-    async (
-      teamName: string,
-      formation: string,
-      draftScore: number,
-      result: string
-    ): Promise<LeaderboardEntry[]> => {
+    async (input: SaveLeaderboardInput): Promise<SaveResult> => {
       setSaving(true);
       setError(null);
       try {
-        const apiResult = await postToApi(teamName, formation, draftScore, result);
-        if (apiResult.ok) {
+        const apiResult = await postToApi(input);
+        if (apiResult.ok && apiResult.saved) {
+          upsertLocalEntry(apiResult.saved);
           await refresh();
-          return entries;
+          return { mode: apiResult.mode, entry: apiResult.saved };
         }
-        // API unavailable — fall back to localStorage
-        const updated = saveLocalEntry(teamName, formation, draftScore, result);
-        setEntries(updated);
+        const local = saveLocalEntry(input);
+        setEntries(upsertLocalEntry(local));
         setMode('local');
-        return updated;
+        return { mode: 'local', entry: local };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to save entry';
-        // Network or server error — try local fallback
         try {
-          const updated = saveLocalEntry(teamName, formation, draftScore, result);
+          const local = saveLocalEntry(input);
+          const updated = upsertLocalEntry(local);
           setEntries(updated);
           setMode('local');
-          setError(`${message} — saved locally instead.`);
-          return updated;
+          setError(`${message} — saved on this device only.`);
+          return { mode: 'local', entry: local };
         } catch {
           setError(message);
           throw err;
@@ -162,7 +178,7 @@ export function useLeaderboard() {
         setSaving(false);
       }
     },
-    [entries, refresh]
+    [refresh]
   );
 
   const clearEntries = useCallback(() => {
