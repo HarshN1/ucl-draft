@@ -2,14 +2,17 @@ import type { Player, Formation, Manager, DraftedPlayer } from '@/types';
 import { MANAGERS } from '@/data/managers';
 import type { BenchSubRole } from '@/constants/squadLayout';
 import { BENCH_ROLE_POSITIONS } from '@/constants/squadLayout';
-import { isInPosition, isExactPosition } from '@/engine/chemistryEngine';
+import {
+  getAdjacency,
+  isInPosition,
+  isExactPosition,
+  normalizeLeague,
+} from '@/engine/chemistryEngine';
 import { premiumHandChance } from '@/lib/premiumCards';
 import { isSpecialCard } from '@/lib/cardStyles';
 import type { Rng } from '@/engine/rng';
 
 // ─── Position mapping ─────────────────────────────────────────────────────────
-// Maps a formation slot's positionGroup to acceptable player positions from DB.
-// Falls back to broader groups if pool is sparse.
 
 const POSITION_MAP: Record<string, string[]> = {
   GK: ['GK'],
@@ -17,7 +20,7 @@ const POSITION_MAP: Record<string, string[]> = {
   FB: ['LB', 'RB', 'LWB', 'RWB'],
   CDM: ['CDM', 'CM', 'DM'],
   CM: ['CM', 'CDM', 'CAM'],
-  CAM: ['CAM', 'LM', 'RM', 'CM'],
+  CAM: ['CAM', 'LM', 'RM', 'CM', 'CF'],
   WG: ['LW', 'RW', 'LM', 'RM', 'CAM'],
   ST: ['ST', 'CF', 'LW', 'RW'],
 };
@@ -26,33 +29,55 @@ export function getAcceptablePositions(positionGroup: string): string[] {
   return POSITION_MAP[positionGroup] ?? ['ST', 'CF', 'LW', 'RW', 'CAM', 'CM'];
 }
 
-// ─── Star weighting ───────────────────────────────────────────────────────────
-// Heavily biases draws toward recognizable, high-rated players (superstars).
+export function canonicalPlayerId(p: Pick<Player, 'id' | 'basePlayerId'>): number {
+  return p.basePlayerId ?? p.id;
+}
+
+function isUsed(p: Player, used: Set<number>): boolean {
+  return used.has(p.id) || (p.basePlayerId !== undefined && used.has(p.basePlayerId));
+}
+
+function markUsed(p: Player, used: Set<number>): void {
+  used.add(p.id);
+  if (p.basePlayerId !== undefined) {
+    used.add(p.basePlayerId);
+  }
+}
+
+// ─── Star & Special weighting ─────────────────────────────────────────────────
 
 function starWeight(ovr: number): number {
+  if (ovr >= 92) return 240;
   if (ovr >= 90) return 210;
   if (ovr >= 88) return 165;
   if (ovr >= 86) return 120;
   if (ovr >= 84) return 80;
-  if (ovr >= 82) return 34;
-  if (ovr >= 80) return 16;
-  if (ovr >= 78) return 2;   // silver 78–79: rare
-  if (ovr >= 75) return 0.6;
-  return 0.2;                // mid/low: almost never
+  if (ovr >= 82) return 38;
+  if (ovr >= 80) return 18;
+  if (ovr >= 78) return 3;
+  if (ovr >= 75) return 0.8;
+  return 0.2;
 }
 
 function specialWeight(p: Player): number {
   if (!isSpecialCard(p)) return 1;
-  if (p.cardType === 'icon' || p.cardType === 'thunderstruck_icon') return 2.4;
-  if (p.cardType === 'hero') return 2;
-  if (p.cardType === 'totw') return 1.6;
-  if (p.cardType === 'thunderstruck' || p.cardType === 'cornerstones') return 1.3;
+  if (p.cardType === 'toty') return 2.5;
+  if (p.cardType === 'tots') return 2.3;
+  if (p.cardType === 'icon' || p.cardType === 'thunderstruck_icon' || p.isLegend) return 2.2;
+  if (p.cardType === 'hero') return 2.0;
+  if (p.cardType === 'futties' || p.cardType === 'motm') return 1.85;
+  if (p.cardType === 'totw') return 1.65;
+  if (p.cardType === 'thunderstruck' || p.cardType === 'cornerstones') return 1.4;
   return 1.2;
 }
 
-function matchesBenchRole(position: string, role: BenchSubRole): boolean {
+function matchesBenchRole(player: Player, role: BenchSubRole): boolean {
   const accepted = BENCH_ROLE_POSITIONS[role];
-  return accepted.includes(position);
+  if (accepted.includes(player.position)) return true;
+  if (player.altPositions && player.altPositions.some((alt) => accepted.includes(alt))) {
+    return true;
+  }
+  return false;
 }
 
 /** Try to inject a special card into a draw pool (position-filtered when possible). */
@@ -60,17 +85,23 @@ function trySpecialPick(
   rng: Rng,
   pool: Player[],
   used: Set<number>,
-  slotGroup?: string
+  slotGroup?: string,
+  aff?: Affinity
 ): Player | null {
-  let specials = pool.filter((p) => isSpecialCard(p) && !used.has(p.id));
+  let specials = pool.filter((p) => isSpecialCard(p) && !isUsed(p, used));
   if (slotGroup) {
     const matched = specials.filter(
-      (p) => isExactPosition(p.position, slotGroup) || isInPosition(p.position, slotGroup)
+      (p) =>
+        isExactPosition(p.position, slotGroup, p.altPositions) ||
+        isInPosition(p.position, slotGroup, p.altPositions)
     );
     if (matched.length) specials = matched;
   }
   if (!specials.length) return null;
-  const weights = specials.map((p) => specialWeight(p) * starWeight(p.overall));
+  const weights = specials.map((p) => {
+    const affBoost = aff && matchesAffinity(p, aff) ? 1.65 : 1;
+    return specialWeight(p) * starWeight(p.overall) * affBoost;
+  });
   return weightedSample(rng, specials, weights);
 }
 
@@ -94,35 +125,73 @@ function weightedSample<T>(rng: Rng, items: T[], weights: number[]): T {
   return items[items.length - 1]!;
 }
 
-// ─── Contextual affinity ("Markov-style progression vector") ───────────────────
-// As the squad fills, it accumulates a thematic identity. Later card pools are
-// skewed toward the squad's two dominant leagues/nationalities so cohesive
-// hybrids become mathematically reachable.
+// ─── Contextual & Adjacency Affinity ──────────────────────────────────────────
 
 interface Affinity {
+  clubs: Set<string>;
   leagues: Set<string>;
   nations: Set<string>;
 }
 
 function tallyAffinity(players: Player[]): Affinity {
+  const cc: Record<string, number> = {};
   const lc: Record<string, number> = {};
   const nc: Record<string, number> = {};
   for (const p of players) {
-    if (p.leagueName) lc[p.leagueName] = (lc[p.leagueName] ?? 0) + 1;
-    if (p.nationalityName) nc[p.nationalityName] = (nc[p.nationalityName] ?? 0) + 1;
+    if (p.clubName && p.clubName !== 'Icons' && p.clubName !== 'HERO') {
+      const c = p.clubName.toLowerCase().trim();
+      cc[c] = (cc[c] ?? 0) + 1;
+    }
+    const normL = normalizeLeague(p.leagueName);
+    if (normL && normL !== 'icons') {
+      lc[normL] = (lc[normL] ?? 0) + 1;
+    }
+    if (p.nationalityName) {
+      const n = p.nationalityName.toLowerCase().trim();
+      nc[n] = (nc[n] ?? 0) + 1;
+    }
   }
-  const top2 = (o: Record<string, number>) =>
+  const topN = (o: Record<string, number>, k: number) =>
     new Set(
       Object.entries(o)
         .sort((a, b) => b[1] - a[1])
-        .slice(0, 2)
+        .slice(0, k)
         .map((e) => e[0])
     );
-  return { leagues: top2(lc), nations: top2(nc) };
+  return { clubs: topN(cc, 3), leagues: topN(lc, 2), nations: topN(nc, 2) };
+}
+
+function buildSlotAffinity(
+  formation: Formation,
+  slotIndex: number,
+  drafted: DraftedPlayer[],
+  allDraftedPlayers: Player[]
+): Affinity {
+  const adj = getAdjacency(formation)[slotIndex] ?? [];
+  const neighbourPlayers = drafted
+    .filter((dp) => adj.includes(dp.slotIndex))
+    .map((dp) => dp.player);
+
+  if (neighbourPlayers.length > 0) {
+    const localAff = tallyAffinity(neighbourPlayers);
+    const globalAff = tallyAffinity(allDraftedPlayers);
+    const clubs = new Set<string>();
+    localAff.clubs.forEach((c) => clubs.add(c));
+    globalAff.clubs.forEach((c) => clubs.add(c));
+    return {
+      clubs,
+      leagues: localAff.leagues.size > 0 ? localAff.leagues : globalAff.leagues,
+      nations: localAff.nations.size > 0 ? localAff.nations : globalAff.nations,
+    };
+  }
+  return tallyAffinity(allDraftedPlayers);
 }
 
 function matchesAffinity(p: Player, a: Affinity): boolean {
-  return a.leagues.has(p.leagueName) || a.nations.has(p.nationalityName);
+  const c = (p.clubName || '').toLowerCase().trim();
+  const l = normalizeLeague(p.leagueName);
+  const n = (p.nationalityName || '').toLowerCase().trim();
+  return (!!c && a.clubs.has(c)) || (!!l && a.leagues.has(l)) || (!!n && a.nations.has(n));
 }
 
 interface Band {
@@ -146,35 +215,43 @@ function selectCard(
   affinityProb: number,
   posExactProb: number
 ): Player | null {
-  const wantAff = (aff.leagues.size > 0 || aff.nations.size > 0) && rng.next() < affinityProb;
+  const hasAff = aff.clubs.size > 0 || aff.leagues.size > 0 || aff.nations.size > 0;
+  const wantAff = hasAff && rng.next() < affinityProb;
   const usePos = related.length === 0 || rng.next() < posExactProb;
   const primary = usePos ? exact : related;
   const f = (list: Player[], lo: number, hi: number, withAff: boolean) =>
     list.filter(
-      (p) => !used.has(p.id) && p.overall >= lo && p.overall <= hi && (!withAff || matchesAffinity(p, aff))
+      (p) => !isUsed(p, used) && p.overall >= lo && p.overall <= hi && (!withAff || matchesAffinity(p, aff))
     );
   let c = f(primary, band.lo, band.hi, wantAff);
   if (!c.length) c = f(primary, band.lo - 3, band.hi + 4, wantAff);
   if (!c.length) c = f(primary, band.lo - 3, band.hi + 4, false);
   if (!c.length) c = f(exact, 0, 99, false);
-  if (!c.length) c = any.filter((p) => !used.has(p.id));
+  if (!c.length) c = any.filter((p) => !isUsed(p, used));
   if (!c.length) return null;
-  const chosen = rng.pick(c);
-  used.add(chosen.id);
+  const chosen = weightedSample(
+    rng,
+    c,
+    c.map((p) => {
+      const clubBonus =
+        wantAff && p.clubName && aff.clubs.has(p.clubName.toLowerCase().trim()) ? 2.2 : 1;
+      return starWeight(p.overall) * clubBonus;
+    })
+  );
+  markUsed(chosen, used);
   return chosen;
 }
 
 /**
- * Weighted Multi-Factor Selection for a STARTER slot — builds a 5-card pool that
- * feels like a structured FUT pack rather than a flat random draw:
+ * FIFA 16 5-Card Starter Slot Draw:
+ *  • Cards 1–2 (Adjacency / Squad Chemistry Bridges): seeded from pitch neighbours
+ *    (`getAdjacency(formation)[slotIndex]`) and squad league/nation core.
+ *  • Cards 3–4 (Position / Rating Band Core): independent of squad links so the
+ *    user faces the authentic FIFA 16 "Higher OVR vs. 10 Chemistry" dilemma.
+ *  • Card 5 (Marquee / Special Upside): high-OVR Gold (85+) or Special/Icon card.
  *
- *  • Card 1  (Anchor):  exact position, 35% an elite 90+, else 85–89.
- *  • Cards 2–3 (Core):  exact position, gold 81–84.
- *  • Card 4 (Chem bridge): a related/exact player 78–83 that shares a league or
- *    nationality with an already-drafted, linked neighbour (reliable chemistry).
- *  • Card 5 (Wildcard): chaos 80–95 from anywhere, weighted to the slot's half.
- *
- * No player already on the pitch/bench/reserves can ever reappear.
+ * Base slots draw strictly from non-special cards so the 23-man squad hits the
+ * authentic FIFA 16 balance (~4–7 Specials + ~16–19 Base Golds).
  */
 export function drawCardsForSlot(
   rng: Rng,
@@ -186,91 +263,90 @@ export function drawCardsForSlot(
   premiumDrafted = 0
 ): Player[] {
   const slotGroup = formation.positions[slotIndex]!.positionGroup;
-  void drafted; // squad context now comes from the global affinity vector below
 
-  const avail = pool.filter((p) => !alreadyDrafted.has(p.id));
-  const exact = avail.filter((p) => isExactPosition(p.position, slotGroup));
-  const related = avail.filter(
-    (p) => !isExactPosition(p.position, slotGroup) && isInPosition(p.position, slotGroup)
+  const avail = pool.filter((p) => !isUsed(p, alreadyDrafted));
+  const basePool = avail.filter((p) => !isSpecialCard(p));
+  const coreAvail = basePool.length >= 10 ? basePool : avail;
+
+  const exact = coreAvail.filter((p) => isExactPosition(p.position, slotGroup, p.altPositions));
+  const related = coreAvail.filter(
+    (p) =>
+      !isExactPosition(p.position, slotGroup, p.altPositions) &&
+      isInPosition(p.position, slotGroup, p.altPositions)
   );
-  const aff = tallyAffinity(pool.filter((p) => alreadyDrafted.has(p.id)));
 
-  const used = new Set<number>();
+  const allDraftedPlayers = pool.filter((p) => isUsed(p, alreadyDrafted));
+  const aff = buildSlotAffinity(formation, slotIndex, drafted, allDraftedPlayers);
+
+  const used = new Set<number>(alreadyDrafted);
   const out: Player[] = [];
 
-  // Rating bands tuned so elites are a treat (≈20%), gold is the norm (≈55%),
-  // and an all-silver pull is rare (floor 79).
   const band = (): Band => {
     const r = rng.next();
-    return r < 0.2 ? { lo: 86, hi: 99 } : r < 0.75 ? { lo: 82, hi: 85 } : { lo: 79, hi: 81 };
+    return r < 0.25 ? { lo: 85, hi: 99 } : r < 0.8 ? { lo: 81, hi: 85 } : { lo: 78, hi: 81 };
   };
 
-  // One premium slot per hand (~14% base; odds halve for each special already drafted).
-  const premiumSlot =
-    rng.next() < premiumHandChance(0.14, premiumDrafted) ? rng.int(5) : -1;
+  // ~44% base chance of a Special card in a starter hand, tapering gently as specials are drafted.
+  const hasPrimarySpecial = rng.next() < premiumHandChance(0.44, premiumDrafted);
+  const premiumSlot = hasPrimarySpecial ? rng.int(5) : -1;
 
-  const pushPick = (p: Player | null, fromSpecial = false) => {
-    if (!p || out.some((x) => x.id === p.id)) return;
-    if (fromSpecial) used.add(p.id);
+  const pushPick = (p: Player | null) => {
+    if (!p || out.some((x) => canonicalPlayerId(x) === canonicalPlayerId(p))) return;
+    markUsed(p, used);
     out.push(p);
   };
 
-  // Options 1–3: strict exact-position matches (premium slot may inject a special).
-  for (let k = 0; k < 3; k++) {
+  // Options 1–2: Chemistry bridges (high affinity to adjacent pitch neighbours / captain).
+  for (let k = 0; k < 2; k++) {
     if (premiumSlot === k) {
-      const sp = trySpecialPick(rng, avail, used, slotGroup);
+      const sp = trySpecialPick(rng, avail, used, slotGroup, aff);
       if (sp) {
-        pushPick(sp, true);
+        pushPick(sp);
         continue;
       }
     }
-    pushPick(selectCard(rng, exact, related, avail, used, band(), aff, k === 2 ? 0.45 : 0.15, 1));
-  }
-  // Option 4: related-position chemistry bridge.
-  if (premiumSlot === 3) {
-    const sp = trySpecialPick(rng, avail, used, slotGroup);
-    if (sp) pushPick(sp, true);
-    else pushPick(selectCard(rng, exact, related, avail, used, { lo: 79, hi: 84 }, aff, 0.45, 0));
-  } else {
-    pushPick(selectCard(rng, exact, related, avail, used, { lo: 79, hi: 84 }, aff, 0.45, 0));
+    pushPick(selectCard(rng, exact, related, coreAvail, used, band(), aff, 0.82, 0.9));
   }
 
-  // Option 5: wildcard — uses premium roll if assigned here, else elite base gold.
+  // Options 3–4: Pure position/rating-band options (1 exact, 1 exact/related hybrid).
+  for (let k = 2; k < 4; k++) {
+    if (premiumSlot === k) {
+      const sp = trySpecialPick(rng, avail, used, slotGroup);
+      if (sp) {
+        pushPick(sp);
+        continue;
+      }
+    }
+    const posExactProb = k === 2 ? 1.0 : 0.45;
+    pushPick(selectCard(rng, exact, related, coreAvail, used, band(), aff, 0.12, posExactProb));
+  }
+
+  // Option 5: Marquee / Wildcard slot — Special if rolled here, else 85+ Base Gold star.
   let o5: Player | null = null;
   if (premiumSlot === 4) {
-    o5 = trySpecialPick(rng, avail, used, slotGroup);
-    if (!o5) {
-      const legs = avail.filter(
-        (p) =>
-          p.isLegend &&
-          !used.has(p.id) &&
-          (isExactPosition(p.position, slotGroup) || isInPosition(p.position, slotGroup))
-      );
-      if (legs.length) o5 = rng.pick(legs);
-    }
+    o5 = trySpecialPick(rng, avail, used, slotGroup, aff);
   }
   if (!o5) {
-    const elites = (exact.length ? exact : avail).filter((p) => !used.has(p.id) && p.overall >= 85);
+    const elites = (exact.length ? exact : coreAvail).filter(
+      (p) => !isUsed(p, used) && p.overall >= 84
+    );
     o5 = elites.length
       ? weightedSample(rng, elites, elites.map((p) => starWeight(p.overall)))
-      : selectCard(rng, exact, related, avail, used, { lo: 84, hi: 99 }, aff, 0.2, 0.8);
+      : selectCard(rng, exact, related, coreAvail, used, { lo: 83, hi: 99 }, aff, 0.25, 0.85);
   }
-  if (o5 && !out.some((x) => x.id === o5!.id)) {
-    used.add(o5.id);
-    out.push(o5);
-  }
+  pushPick(o5);
 
   while (out.length < 5) {
-    const f = avail.find((p) => !used.has(p.id));
+    const f = coreAvail.find((p) => !isUsed(p, used)) ?? avail.find((p) => !isUsed(p, used));
     if (!f) break;
-    used.add(f.id);
-    out.push(f);
+    pushPick(f);
   }
   return rng.shuffle(out).slice(0, 5);
 }
 
 /**
- * Draw 5 captain candidates — all big-name stars (OVR 86+ preferred).
+ * Draw 5 captain candidates — FIFA 16 Captain Round:
+ * Mixes 1–2 elite Special/Icon superstars with 3–4 Base Gold 88+ superstars.
  */
 export function drawCaptainCandidates(
   rng: Rng,
@@ -278,46 +354,60 @@ export function drawCaptainCandidates(
   alreadyDrafted: Set<number>,
   premiumDrafted = 0
 ): Player[] {
-  let eligible = pool.filter((p) => p.overall >= 88 && !alreadyDrafted.has(p.id));
+  const avail = pool.filter((p) => !isUsed(p, alreadyDrafted));
+  let eligible = avail.filter((p) => p.overall >= 88);
   if (eligible.length < 5) {
-    eligible = pool.filter((p) => p.overall >= 84 && !alreadyDrafted.has(p.id));
+    eligible = avail.filter((p) => p.overall >= 84);
   }
   if (eligible.length < 5) {
-    return pool
-      .filter((p) => !alreadyDrafted.has(p.id))
-      .sort((a, b) => b.overall - a.overall)
-      .slice(0, 5);
+    return avail.sort((a, b) => b.overall - a.overall).slice(0, 5);
   }
+
+  const baseStars = eligible.filter((p) => !isSpecialCard(p));
+  const specialStars = eligible.filter((p) => isSpecialCard(p));
 
   const picks: Player[] = [];
-  const used = new Set<number>();
-  let rem = [...eligible];
-  while (picks.length < 5 && rem.length > 0) {
-    const choice = weightedSample(rng, rem, rem.map((p) => starWeight(p.overall)));
-    if (!used.has(choice.id)) {
-      picks.push(choice);
-      used.add(choice.id);
-    }
-    rem = rem.filter((p) => p.id !== choice.id);
+  const used = new Set<number>(alreadyDrafted);
+
+  // Target 1 or 2 special captains when both pools are populated, else fall back cleanly.
+  const targetSpecials =
+    specialStars.length > 0 && baseStars.length >= 3
+      ? rng.next() < premiumHandChance(0.55, premiumDrafted)
+        ? 2
+        : 1
+      : 0;
+
+  while (picks.length < targetSpecials) {
+    const remSp = specialStars.filter((p) => !isUsed(p, used));
+    if (!remSp.length) break;
+    const choice = weightedSample(
+      rng,
+      remSp,
+      remSp.map((p) => specialWeight(p) * starWeight(p.overall))
+    );
+    markUsed(choice, used);
+    picks.push(choice);
   }
 
-  // Chance to guarantee at least one special captain option (tapers if squad has specials).
-  if (
-    rng.next() < premiumHandChance(0.35, premiumDrafted) &&
-    !picks.some((p) => isSpecialCard(p))
-  ) {
-    const sp = eligible.filter((p) => isSpecialCard(p) && !used.has(p.id));
-    if (sp.length) {
-      const choice = weightedSample(rng, sp, sp.map((p) => specialWeight(p) * starWeight(p.overall)));
-      picks[rng.int(picks.length)] = choice;
-    }
+  while (picks.length < 5) {
+    const remBase = baseStars.filter((p) => !isUsed(p, used));
+    const remAny = eligible.filter((p) => !isUsed(p, used));
+    const source = remBase.length > 0 ? remBase : remAny;
+    if (!source.length) break;
+    const choice = weightedSample(
+      rng,
+      source,
+      source.map((p) => starWeight(p.overall))
+    );
+    markUsed(choice, used);
+    picks.push(choice);
   }
-  return picks;
+
+  return rng.shuffle(picks);
 }
 
 /**
- * Substitutes: position-matched backups — one option may roll elite (86+), the
- * rest are solid gold utilities (80–84), with a moderate affinity bias.
+ * Substitutes: position-matched backups (7 slots: GK, DEF, DEF, MID, MID, ATT, ATT).
  */
 export function drawSubCandidates(
   rng: Rng,
@@ -326,26 +416,41 @@ export function drawSubCandidates(
   alreadyDrafted: Set<number>,
   premiumDrafted = 0
 ): Player[] {
-  const avail = pool.filter((p) => !alreadyDrafted.has(p.id));
-  const exact = avail.filter((p) => matchesBenchRole(p.position, benchRole));
-  const related: Player[] = [];
-  const aff = tallyAffinity(pool.filter((p) => alreadyDrafted.has(p.id)));
+  const avail = pool.filter((p) => !isUsed(p, alreadyDrafted));
+  const basePool = avail.filter((p) => !isSpecialCard(p));
+  const coreAvail = basePool.length >= 10 ? basePool : avail;
 
-  const used = new Set<number>();
+  const exact = coreAvail.filter((p) => matchesBenchRole(p, benchRole));
+  const related: Player[] = [];
+  const aff = tallyAffinity(pool.filter((p) => isUsed(p, alreadyDrafted)));
+
+  const used = new Set<number>(alreadyDrafted);
   const out: Player[] = [];
   const subPremium =
-    rng.next() < premiumHandChance(0.08, premiumDrafted) ? rng.int(5) : -1;
+    rng.next() < premiumHandChance(0.32, premiumDrafted) ? rng.int(5) : -1;
+
   for (let k = 0; k < 5; k++) {
-    const band: Band = k === 0 ? (rng.next() < 0.5 ? { lo: 86, hi: 99 } : { lo: 82, hi: 85 }) : { lo: 80, hi: 84 };
+    const band: Band =
+      k === 0
+        ? rng.next() < 0.55
+          ? { lo: 85, hi: 99 }
+          : { lo: 82, hi: 85 }
+        : { lo: 79, hi: 84 };
     let p: Player | null = null;
-    if (k === subPremium) p = trySpecialPick(rng, avail, used);
-    if (!p) p = selectCard(rng, exact, related, avail, used, band, aff, 0.4, 0.8);
-    if (p) out.push(p);
+    if (k === subPremium) {
+      const roleSpecials = avail.filter((sp) => matchesBenchRole(sp, benchRole));
+      p = trySpecialPick(rng, roleSpecials.length ? roleSpecials : avail, used, undefined, aff);
+      if (p) markUsed(p, used);
+    }
+    if (!p) p = selectCard(rng, exact, related, coreAvail, used, band, aff, 0.45, 0.85);
+    if (p && !out.some((x) => canonicalPlayerId(x) === canonicalPlayerId(p))) {
+      out.push(p);
+    }
   }
   while (out.length < 5) {
-    const f = avail.find((p) => !used.has(p.id));
+    const f = coreAvail.find((p) => !isUsed(p, used)) ?? avail.find((p) => !isUsed(p, used));
     if (!f) break;
-    used.add(f.id);
+    markUsed(f, used);
     out.push(f);
   }
   return rng.shuffle(out).slice(0, 5);
@@ -353,8 +458,7 @@ export function drawSubCandidates(
 
 /**
  * Reserves: true "blind" wildcards like the console game — a randomised mix of
- * positions and ratings (no fixed slot). Elites are uncommon and an all-silver
- * pull is rare; the occasional Legend can show up as a late chemistry-saver.
+ * positions and ratings (no fixed slot).
  */
 export function drawReserveWildcard(
   rng: Rng,
@@ -362,8 +466,11 @@ export function drawReserveWildcard(
   alreadyDrafted: Set<number>,
   premiumDrafted = 0
 ): Player[] {
-  const avail = pool.filter((p) => !alreadyDrafted.has(p.id));
-  const used = new Set<number>();
+  const avail = pool.filter((p) => !isUsed(p, alreadyDrafted));
+  const basePool = avail.filter((p) => !isSpecialCard(p));
+  const coreAvail = basePool.length >= 10 ? basePool : avail;
+
+  const used = new Set<number>(alreadyDrafted);
   const out: Player[] = [];
   const groupCounts: Record<string, number> = {};
   let gkCount = 0;
@@ -382,16 +489,17 @@ export function drawReserveWildcard(
 
   const band = (): Band => {
     const r = rng.next();
-    return r < 0.1 ? { lo: 86, hi: 99 } : r < 0.68 ? { lo: 80, hi: 85 } : { lo: 75, hi: 79 };
+    return r < 0.16 ? { lo: 85, hi: 99 } : r < 0.72 ? { lo: 80, hi: 85 } : { lo: 75, hi: 79 };
   };
 
   const pickWeightedBase = (): Player | null => {
     const b = band();
-    let c = avail.filter(
-      (x) => !used.has(x.id) && x.overall >= b.lo && x.overall <= b.hi && canPick(x)
+    let c = coreAvail.filter(
+      (x) => !isUsed(x, used) && x.overall >= b.lo && x.overall <= b.hi && canPick(x)
     );
-    if (!c.length) c = avail.filter((x) => !used.has(x.id) && canPick(x));
-    if (!c.length) c = avail.filter((x) => !used.has(x.id));
+    if (!c.length) c = coreAvail.filter((x) => !isUsed(x, used) && canPick(x));
+    if (!c.length) c = avail.filter((x) => !isUsed(x, used) && canPick(x));
+    if (!c.length) c = avail.filter((x) => !isUsed(x, used));
     if (!c.length) return null;
     return weightedSample(
       rng,
@@ -400,9 +508,8 @@ export function drawReserveWildcard(
     );
   };
 
-  // At most one premium card per reserve hand (~8% base, tapers with drafted specials).
   const premiumSlot =
-    rng.next() < premiumHandChance(0.08, premiumDrafted) ? rng.int(5) : -1;
+    rng.next() < premiumHandChance(0.28, premiumDrafted) ? rng.int(5) : -1;
 
   for (let k = 0; k < 5; k++) {
     let p: Player | null = null;
@@ -411,26 +518,24 @@ export function drawReserveWildcard(
       if (p && !canPick(p)) p = null;
     }
     if (!p) p = pickWeightedBase();
-    if (p) {
-      used.add(p.id);
+    if (p && !out.some((x) => canonicalPlayerId(x) === canonicalPlayerId(p))) {
+      markUsed(p, used);
       recordPick(p);
       out.push(p);
     }
   }
 
   while (out.length < 5) {
-    const f = avail.find((x) => !used.has(x.id));
+    const f = coreAvail.find((x) => !isUsed(x, used)) ?? avail.find((x) => !isUsed(x, used));
     if (!f) break;
-    used.add(f.id);
+    markUsed(f, used);
     out.push(f);
   }
   return rng.shuffle(out).slice(0, 5);
 }
 
 /**
- * Select 5 formations of distinct shapes for the picker. Many formations share
- * a base name (e.g. five 4-3-3 variants); we pick 5 different names and a random
- * variant of each, so the picker always shows variety.
+ * Select 5 formations of distinct shapes for the picker.
  */
 export function sampleFormations(rng: Rng, formations: Formation[]): Formation[] {
   const byName: Record<string, Formation[]> = {};
@@ -452,26 +557,31 @@ export function drawManagers(rng: Rng): Manager[] {
  */
 export function findBestSlotForCaptain(
   position: string,
-  formation: Formation
+  formation: Formation,
+  altPositions?: string[]
 ): number {
   const positions = formation.positions;
 
-  // Try exact position match first
   let idx = positions.findIndex((p) => {
     const acceptable = getAcceptablePositions(p.positionGroup);
     return acceptable.includes(position);
   });
 
-  // If the only match is GK slot but player isn't a GK, skip it
+  if (idx === -1 && altPositions && altPositions.length > 0) {
+    idx = positions.findIndex((p) => {
+      const acceptable = getAcceptablePositions(p.positionGroup);
+      return altPositions.some((alt) => acceptable.includes(alt));
+    });
+  }
+
   if (idx === 0 && position !== 'GK') {
     idx = positions.findIndex((p, i) => {
-      if (i === 0) return false; // skip GK slot
+      if (i === 0) return false;
       const acceptable = getAcceptablePositions(p.positionGroup);
       return acceptable.includes(position);
     });
   }
 
-  // Final fallback: first non-GK slot
   if (idx === -1) {
     idx = positions.findIndex((p) => p.positionGroup !== 'GK');
   }

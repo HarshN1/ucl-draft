@@ -36,4 +36,15 @@ describe('simulateMatch', () => {
       true
     );
   });
+
+  it('automatically performs Manager substitutions from the bench during the 2nd half', () => {
+    const result = simulateMatch(new Rng(7), makeTestSquad(), OPPONENT, 0);
+    const subEvents = result.events.filter((e) => e.type === 'SUBSTITUTION');
+    expect(subEvents.length).toBeGreaterThan(0);
+    expect(subEvents.length).toBeLessThanOrEqual(3);
+    for (const ev of subEvents) {
+      expect(ev.minute).toBeGreaterThanOrEqual(58);
+      expect(ev.minute).toBeLessThanOrEqual(82);
+    }
+  });
 });

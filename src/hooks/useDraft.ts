@@ -48,7 +48,10 @@ export function useDraft() {
         if (specialRes.ok) {
           specials = await specialRes.json();
         }
-        const pool = [...base, ...specials, ...LEGENDS].map(withDisplayName);
+        const fallbackLegends = specials.some((p) => p.isLegend || p.cardType === 'icon')
+          ? []
+          : LEGENDS;
+        const pool = [...base, ...specials, ...fallbackLegends].map(withDisplayName);
         dispatch({ type: 'SET_POOL', pool });
       } catch (err) {
         dispatch({
@@ -81,7 +84,10 @@ export function useDraft() {
         }
         const base: Player[] = await baseRes.json();
         const specials: Player[] = specialRes.ok ? await specialRes.json() : [];
-        const pool = [...base, ...specials, ...LEGENDS].map(withDisplayName);
+        const fallbackLegends = specials.some((p) => p.isLegend || p.cardType === 'icon')
+          ? []
+          : LEGENDS;
+        const pool = [...base, ...specials, ...fallbackLegends].map(withDisplayName);
         const hydrated = hydrateRun(persisted!, pool, FORMATIONS, MANAGERS);
         if (hydrated) setPendingResume(hydrated);
         else clearPersistedRun();

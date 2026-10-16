@@ -24,6 +24,7 @@ import {
   calculateChemistry,
   previewChemistryWithCandidate,
   isInPosition,
+  normalizeLeague,
 } from '@/engine/chemistryEngine';
 import {
   generateBracket,
@@ -49,12 +50,6 @@ import {
   newRunId,
   type PersistedRun,
 } from '@/lib/persist';
-
-// Squad-rating weights: the starting XI is what counts, substitutes nudge it a
-// little, and reserves have no effect at all.
-const STARTER_WEIGHT = 5;
-const SUB_WEIGHT = 1;
-const RESERVE_WEIGHT = 0;
 
 export type SlotZone = 'starter' | 'bench';
 export interface ActiveSlot {
@@ -153,8 +148,18 @@ export function createInitialState(seed = 0): DraftState {
 
 export function draftedIds(starters: (Player | null)[], bench: (Player | null)[]): Set<number> {
   const s = new Set<number>();
-  for (const p of starters) if (p) s.add(p.id);
-  for (const p of bench) if (p) s.add(p.id);
+  for (const p of starters) {
+    if (p) {
+      s.add(p.id);
+      if (p.basePlayerId !== undefined) s.add(p.basePlayerId);
+    }
+  }
+  for (const p of bench) {
+    if (p) {
+      s.add(p.id);
+      if (p.basePlayerId !== undefined) s.add(p.basePlayerId);
+    }
+  }
   return s;
 }
 
@@ -173,7 +178,7 @@ export function startersDrafted(
       slot: slot.slot,
       slotIndex: i,
       chemistry: 0,
-      outOfPosition: !isInPosition(p.position, slot.positionGroup),
+      outOfPosition: !isInPosition(p.position, slot.positionGroup, p.altPositions),
     });
   });
   return out;
@@ -187,21 +192,32 @@ export function computeChem(
   return calculateChemistry(startersDrafted(starterPlayers, formation), formation, manager);
 }
 
-/** Weighted rating: starters heavier than bench/reserves. */
+/**
+ * FIFA 16 18-Player Squad Rating Formula:
+ * - Only the 11 Starters + 7 Substitutes count (5 Reserves are excluded).
+ * - Sum their OVRs, compute the 18-player mean, and add the Above-Average
+ *   Correction Factor (sum of positive deviations above the mean), then divide by N.
+ */
 export function weightedRating(
   starterPlayers: (Player | null)[],
   benchPlayers: (Player | null)[]
 ): number {
-  let sum = 0;
-  let w = 0;
-  for (const p of starterPlayers) if (p) { sum += p.overall * STARTER_WEIGHT; w += STARTER_WEIGHT; }
-  benchPlayers.forEach((p, i) => {
-    if (!p) return;
-    const wt = i < SUBS_COUNT ? SUB_WEIGHT : RESERVE_WEIGHT;
-    sum += p.overall * wt;
-    w += wt;
-  });
-  return w ? Math.round(sum / w) : 0;
+  const active: number[] = [];
+  for (const p of starterPlayers) {
+    if (p) active.push(p.overall);
+  }
+  for (let i = 0; i < Math.min(SUBS_COUNT, benchPlayers.length); i++) {
+    const p = benchPlayers[i];
+    if (p) active.push(p.overall);
+  }
+  if (active.length === 0) return 0;
+
+  const count = active.length;
+  const sum = active.reduce((acc, ovr) => acc + ovr, 0);
+  const avg = sum / count;
+  const excess = active.reduce((acc, ovr) => acc + Math.max(0, ovr - avg), 0);
+  const total = sum + Math.round(excess);
+  return Math.min(99, Math.floor(total / count));
 }
 
 export function isAllFilled(starterPlayers: (Player | null)[], benchPlayers: (Player | null)[]) {
@@ -356,15 +372,13 @@ function quickSimAllRemaining(state: DraftState, rng: Rng): DraftState {
 }
 
 function managerChemBoost(manager: Manager, starters: (Player | null)[]): number {
-  const normLeague = (s: string) => (s || '').toLowerCase();
+  const mgrLeague = normalizeLeague(manager.leagueName);
+  const mgrNation = manager.nationalityName.toLowerCase().trim();
   let n = 0;
   for (const p of starters) {
     if (!p) continue;
-    const sameNation =
-      p.nationalityName.toLowerCase() === manager.nationalityName.toLowerCase();
-    const sameLeague =
-      normLeague(p.leagueName).includes(normLeague(manager.leagueName).split(' ')[0] ?? '') ||
-      normLeague(manager.leagueName).includes(normLeague(p.leagueName).split(' ')[0] ?? '');
+    const sameNation = p.nationalityName.toLowerCase().trim() === mgrNation;
+    const sameLeague = !!mgrLeague && normalizeLeague(p.leagueName) === mgrLeague;
     if (sameNation || sameLeague) n++;
   }
   return n;

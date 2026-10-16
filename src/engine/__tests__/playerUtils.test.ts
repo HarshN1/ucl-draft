@@ -65,11 +65,23 @@ describe('drawCardsForSlot', () => {
     expect(ids.size).toBe(cards.length);
   });
 
-  it('never returns already-drafted players', () => {
+  it('never returns already-drafted players or duplicate basePlayerId versions', () => {
     const used = new Set(TEST_POOL.slice(0, 3).map((p) => p.id));
-    const cards = drawCardsForSlot(new Rng(1), TEST_POOL, FORMATION_433, 9, [], used);
+    const poolWithPromo = [
+      ...TEST_POOL,
+      {
+        ...HAALAND,
+        id: 8000999,
+        basePlayerId: HAALAND.id,
+        overall: 97,
+        cardType: 'toty' as const,
+      },
+    ];
+    used.add(HAALAND.id);
+    const cards = drawCardsForSlot(new Rng(1), poolWithPromo, FORMATION_433, 9, [], used);
     for (const card of cards) {
       expect(used.has(card.id)).toBe(false);
+      expect(card.basePlayerId).not.toBe(HAALAND.id);
     }
   });
 });

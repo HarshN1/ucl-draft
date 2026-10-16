@@ -24,3 +24,17 @@ export function applyDisplayNameToRecord<T extends Pick<Player, 'id' | 'name' | 
   const name = displayName(player);
   return name === player.name ? player : { ...player, name };
 }
+
+/**
+ * Formats a player's name for the FIFA 16 horizontal nameplate bar.
+ * Preserves multi-word surnames/known names ("van Dijk", "Vini Jr", "Roberto Carlos",
+ * "De Bruyne", "van Basten", "Xabi Alonso") while stripping abbreviated initial
+ * prefixes like "K. Mbappé" → "Mbappé" or "J. Bellingham" → "Bellingham".
+ */
+export function formatCardName(player: Pick<Player, 'id' | 'name' | 'basePlayerId'>): string {
+  const raw = displayName(player).trim();
+  // Strip leading initial(s) like "K. ", "J. M. ", "M.-A. "
+  const withoutInitials = raw.replace(/^(?:[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ]?\.[\s-]*)+/, '').trim();
+  return withoutInitials || raw;
+}
+

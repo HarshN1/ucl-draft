@@ -301,29 +301,35 @@ body::after {
   max-width: min(96cqw, 56rem);
 }
 
+/* FIFA 16 subtle broadcast camera pitch perspective */
+.fifa16-pitch-perspective {
+  perspective: 1100px;
+}
+.fifa16-pitch-surface {
+  transform: rotateX(7deg);
+  transform-origin: center 65%;
+}
+
 .draft-board--dimmed {
-  filter: blur(3px) brightness(0.72) saturate(0.85);
-  transform: scale(0.98);
-  transition: filter 0.25s ease, transform 0.25s ease;
+  /* Keep pitch unblurred so live chemistry link lines remain sharp behind the 5-card ribbon */
+  filter: brightness(0.92);
+  transform: scale(0.99);
+  transition: filter 0.2s ease, transform 0.2s ease;
 }
 
 .draft-board--focused {
   filter: none;
   transform: scale(1);
-  transition: filter 0.25s ease, transform 0.25s ease;
+  transition: filter 0.2s ease, transform 0.2s ease;
 }
 
-/* Light blur scrim — squad stays visible behind picks */
+/* Light vignette scrim — squad and glowing chemistry lines stay crisp behind picks */
 .draft-scrim {
-  background: rgba(6, 18, 28, 0.28);
-  backdrop-filter: blur(10px) saturate(1.1);
-  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  background: radial-gradient(ellipse 90% 75% at 50% 40%, rgba(6, 18, 28, 0.14) 0%, rgba(4, 12, 20, 0.52) 100%);
 }
 
 .draft-scrim--peek {
-  background: rgba(6, 18, 28, 0.08);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
+  background: rgba(6, 18, 28, 0.05);
 }
 
 .draft-pick-band {

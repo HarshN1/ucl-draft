@@ -1,13 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { clsx } from 'clsx';
 import type { MatchEvent } from '@/types';
 
 interface EventFeedProps {
   events: MatchEvent[];
-  onAllEventsShown?: () => void;
-  onGoalEvent?: () => void;
+  currentMinute?: number;
 }
 
 const EVENT_ICONS: Record<string, string> = {
@@ -21,73 +19,87 @@ const EVENT_ICONS: Record<string, string> = {
   FOUL: '⚠️',
 };
 
-export function EventFeed({ events, onAllEventsShown, onGoalEvent }: EventFeedProps) {
-  const [visibleCount, setVisibleCount] = useState(0);
+const EVENT_TAG: Record<string, string> = {
+  GOAL: 'GOAL',
+  SUBSTITUTION: 'MANAGER SUB',
+  SAVE: 'BIG SAVE',
+  CHANCE: 'CLOSE CHANCE',
+  YELLOW_CARD: 'BOOKING',
+  RED_CARD: 'RED CARD',
+};
 
-  useEffect(() => {
-    setVisibleCount(0);
-    if (events.length === 0) return;
-
-    let current = 0;
-    const reveal = () => {
-      current++;
-      setVisibleCount(current);
-
-      const event = events[current - 1];
-      if (event?.isGoal && onGoalEvent) {
-        onGoalEvent();
-      }
-
-      if (current < events.length) {
-        setTimeout(reveal, 900);
-      } else {
-        if (onAllEventsShown) setTimeout(onAllEventsShown, 900);
-      }
-    };
-
-    const start = setTimeout(reveal, 400);
-    return () => clearTimeout(start);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [events]);
-
-  const visibleEvents = events.slice(0, visibleCount);
+export function EventFeed({ events, currentMinute }: EventFeedProps) {
+  const visibleEvents =
+    currentMinute === undefined
+      ? events
+      : events.filter((e) => e.minute <= currentMinute);
 
   return (
-    <div className="flex flex-col gap-1.5 h-full overflow-hidden">
-      {visibleEvents.map((event, idx) => (
-        <div
-          key={idx}
-          className={clsx(
-            'flex items-start gap-2 px-2 py-1.5 rounded-lg text-xs animate-fade-in',
-            event.isGoal
-              ? 'bg-accent/10 border border-accent/30 animate-goal-flash'
-              : 'bg-white/5'
-          )}
-        >
-          <span className="text-base flex-shrink-0 mt-0.5">
-            {EVENT_ICONS[event.type] ?? '•'}
-          </span>
-          <span
+    <div className="flex flex-col gap-1.5 h-full overflow-y-auto pr-1">
+      {visibleEvents.map((event, idx) => {
+        const isSub = event.type === 'SUBSTITUTION';
+        const isBig = event.isGoal || event.type === 'SAVE' || isSub;
+        const tag = EVENT_TAG[event.type];
+        return (
+          <div
+            key={idx}
             className={clsx(
-              'font-body leading-snug',
+              'flex items-start gap-2 px-2.5 py-1.5 rounded-[3px] text-xs animate-fade-in border',
               event.isGoal
                 ? event.isUserTeam
-                  ? 'text-accent font-semibold'
-                  : 'text-ucl-red font-semibold'
-                : 'text-white/80'
+                  ? 'bg-accent/15 border-accent/50 animate-goal-flash'
+                  : 'bg-ucl-red/15 border-ucl-red/50 animate-goal-flash'
+                : isSub
+                  ? 'bg-gold/10 border-gold/35'
+                  : event.type === 'SAVE'
+                    ? 'bg-white/10 border-white/20'
+                    : 'bg-white/5 border-white/5'
             )}
           >
-            {event.description}
-          </span>
-        </div>
-      ))}
+            <span className="text-sm flex-shrink-0 mt-0.5">
+              {EVENT_ICONS[event.type] ?? '•'}
+            </span>
+            <div className="flex-1 min-w-0">
+              {isBig && tag && (
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span
+                    className={clsx(
+                      'font-display font-bold text-[9px] uppercase tracking-widest px-1 py-[0.5px] rounded-[2px]',
+                      event.isGoal
+                        ? event.isUserTeam
+                          ? 'bg-accent text-black'
+                          : 'bg-ucl-red text-white'
+                        : isSub
+                          ? 'bg-gold text-black'
+                          : 'bg-white/20 text-white'
+                    )}
+                  >
+                    {tag}
+                  </span>
+                </div>
+              )}
+              <span
+                className={clsx(
+                  'font-body leading-snug block',
+                  event.isGoal
+                    ? event.isUserTeam
+                      ? 'text-accent font-semibold'
+                      : 'text-ucl-red font-semibold'
+                    : isSub
+                      ? 'text-gold font-medium'
+                      : 'text-white/85'
+                )}
+              >
+                {event.description}
+              </span>
+            </div>
+          </div>
+        );
+      })}
 
-      {/* Pulsing indicator while events are loading */}
-      {visibleCount < events.length && (
-        <div className="flex items-center gap-2 px-3 py-2 text-white/30 text-xs">
-          <span className="animate-pulse">●</span>
-          <span className="animate-pulse" style={{ animationDelay: '0.2s' }}>●</span>
-          <span className="animate-pulse" style={{ animationDelay: '0.4s' }}>●</span>
+      {visibleEvents.length === 0 && (
+        <div className="flex items-center gap-2 px-3 py-4 text-white/35 text-xs font-display uppercase tracking-widest justify-center">
+          Kick-off underway — match clock advancing…
         </div>
       )}
     </div>

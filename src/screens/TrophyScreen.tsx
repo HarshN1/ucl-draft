@@ -22,19 +22,25 @@ function Confetti() {
   const colors = ['#ffd700', '#00d4ff', '#00ff88', '#ffffff', '#ffd700'];
   return (
     <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-      {Array.from({ length: 30 }, (_, i) => (
-        <div
-          key={i}
-          className="absolute w-2 h-2 rounded-sm animate-confetti"
-          style={{
-            left: `${Math.random() * 100}%`,
-            top: `-${Math.random() * 20}%`,
-            backgroundColor: colors[i % colors.length],
-            animationDelay: `${Math.random() * 2}s`,
-            animationDuration: `${2.5 + Math.random() * 1.5}s`,
-          }}
-        />
-      ))}
+      {Array.from({ length: 30 }, (_, i) => {
+        const leftPct = (i * 37 + 13) % 100;
+        const topPct = (i * 19 + 5) % 20;
+        const delaySec = ((i * 29) % 20) / 10;
+        const durationSec = 2.5 + ((i * 17) % 15) / 10;
+        return (
+          <div
+            key={i}
+            className="absolute w-2 h-2 rounded-sm animate-confetti"
+            style={{
+              left: `${leftPct}%`,
+              top: `-${topPct}%`,
+              backgroundColor: colors[i % colors.length],
+              animationDelay: `${delaySec}s`,
+              animationDuration: `${durationSec}s`,
+            }}
+          />
+        );
+      })}
     </div>
   );
 }

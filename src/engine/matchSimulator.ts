@@ -7,6 +7,7 @@ import type {
   DraftedPlayer,
 } from '@/types';
 import type { Rng } from '@/engine/rng';
+import { playerPositionGroup } from '@/engine/chemistryEngine';
 
 // ─── Small math helpers ────────────────────────────────────────────────────────
 
@@ -18,23 +19,111 @@ const gauss = (rng: Rng) => rng.next() + rng.next() + rng.next() - 1.5;
 
 const DEF_SLOTS = new Set(['GK', 'LB', 'RB', 'LCB', 'RCB', 'CB', 'LWB', 'RWB']);
 const ATT_SLOTS = new Set(['ST', 'LS', 'RS', 'CF', 'LF', 'RF', 'LW', 'RW']);
-// everything else (CDM/CM/CAM variants, LM, RM) is treated as midfield.
+
+/**
+ * Real 2026/27 UCL Club Star Rosters for authentic AI scorer/booking narration.
+ */
+const AI_CLUB_ROSTERS: Record<string, { attackers: string[]; defenders: string[] }> = {
+  'real-madrid': {
+    attackers: ['Mbappé', 'Vini Jr', 'Bellingham', 'Rodrygo', 'Valverde'],
+    defenders: ['Rüdiger', 'Militão', 'Tchouaméni', 'Carvajal', 'Camavinga'],
+  },
+  'man-city': {
+    attackers: ['Haaland', 'Foden', 'De Bruyne', 'Savinho', 'Doku'],
+    defenders: ['Rúben Dias', 'Rodri', 'Gvardiol', 'Akanji', 'Walker'],
+  },
+  bayern: {
+    attackers: ['Kane', 'Musiala', 'Olise', 'Sané', 'Gnabry'],
+    defenders: ['Upamecano', 'Kim Min-jae', 'Kimmich', 'Davies', 'Palhinha'],
+  },
+  liverpool: {
+    attackers: ['Salah', 'Luis Díaz', 'Gakpo', 'Szoboszlai', 'Darwin Núñez'],
+    defenders: ['van Dijk', 'Konaté', 'Gravenberch', 'Mac Allister', 'Robertson'],
+  },
+  psg: {
+    attackers: ['Dembélé', 'Barcola', 'Doué', 'Vitinha', 'Gonçalo Ramos'],
+    defenders: ['Marquinhos', 'Hakimi', 'Pacho', 'João Neves', 'Nuno Mendes'],
+  },
+  barcelona: {
+    attackers: ['Lewandowski', 'Lamine Yamal', 'Raphinha', 'Dani Olmo', 'Pedri'],
+    defenders: ['Koundé', 'Cubarsí', 'Araujo', 'de Jong', 'Balde'],
+  },
+  arsenal: {
+    attackers: ['Saka', 'Ødegaard', 'Havertz', 'Martinelli', 'Trossard'],
+    defenders: ['Saliba', 'Gabriel', 'Declan Rice', 'Timber', 'Calafiori'],
+  },
+  leverkusen: {
+    attackers: ['Wirtz', 'Boniface', 'Schick', 'Grimaldo', 'Frimpong'],
+    defenders: ['Tah', 'Tapsoba', 'Xhaka', 'Hincapié', 'Andrich'],
+  },
+  atletico: {
+    attackers: ['Julián Alvarez', 'Griezmann', 'Sørloth', 'Giuliano Simeone', 'De Paul'],
+    defenders: ['Giménez', 'Le Normand', 'Koke', 'Marcos Llorente', 'Barrios'],
+  },
+  inter: {
+    attackers: ['Lautaro Martínez', 'Thuram', 'Barella', 'Çalhanoğlu', 'Dimarco'],
+    defenders: ['Bastoni', 'Pavard', 'Dumfries', 'Acerbi', 'Mkhitaryan'],
+  },
+  dortmund: {
+    attackers: ['Guirassy', 'Adeyemi', 'Brandt', 'Gittens', 'Beier'],
+    defenders: ['Schlotterbeck', 'Emre Can', 'Sabitzer', 'Ryerson', 'Anton'],
+  },
+  leipzig: {
+    attackers: ['Openda', 'Šeško', 'Xavi Simons', 'Nusa', 'Baumgartner'],
+    defenders: ['Orbán', 'Lukeba', 'Raum', 'Haidara', 'Henrichs'],
+  },
+  juventus: {
+    attackers: ['Vlahović', 'Yıldız', 'Koopmeiners', 'Conceição', 'Nico González'],
+    defenders: ['Bremer', 'Cambiaso', 'Locatelli', 'Gatti', 'Thuram'],
+  },
+  porto: {
+    attackers: ['Samu Aghehowa', 'Pepê', 'Galeno', 'Fábio Vieira', 'Nico González'],
+    defenders: ['Diogo Costa', 'Alan Varela', 'Nehuén Pérez', 'Martim Fernandes', 'Moura'],
+  },
+  benfica: {
+    attackers: ['Di María', 'Pavlidis', 'Aktürkoğlu', 'Kökçü', 'Aursnes'],
+    defenders: ['Otamendi', 'António Silva', 'Florentino', 'Bah', 'Carreras'],
+  },
+  monaco: {
+    attackers: ['Akliouche', 'Ben Seghir', 'Embolo', 'Minamino', 'Golovin'],
+    defenders: ['Zakaria', 'Vanderson', 'Kehrer', 'Singa', 'Camara'],
+  },
+};
+
+function pickOpponentAttacker(rng: Rng, opponent: BracketTeam): string {
+  const roster = AI_CLUB_ROSTERS[opponent.id];
+  if (roster && roster.attackers.length > 0) {
+    return `${rng.pick(roster.attackers)} (${opponent.name})`;
+  }
+  return opponent.name;
+}
+
+function pickOpponentFoulPlayer(rng: Rng, opponent: BracketTeam): string {
+  const roster = AI_CLUB_ROSTERS[opponent.id];
+  if (roster && roster.defenders.length > 0) {
+    return `${rng.pick(roster.defenders)} (${opponent.name})`;
+  }
+  return opponent.name;
+}
 
 interface SquadStats {
   attack: number;
   midfield: number;
-  defense: number; // outfield defensive line
+  defense: number;
   gk: number;
-  chemMult: number; // 0.80–1.20
+  chemMult: number;
 }
 
-function avgStat(players: DraftedPlayer[], fn: (p: DraftedPlayer['player']) => number, fallback: number) {
+function avgStat(
+  players: DraftedPlayer[],
+  fn: (p: DraftedPlayer['player']) => number,
+  fallback: number
+) {
   if (!players.length) return fallback;
   return players.reduce((a, dp) => a + fn(dp.player), 0) / players.length;
 }
 
-function extractUserStats(squad: Squad): SquadStats {
-  const starters = squad.starters;
+function extractUserStats(starters: DraftedPlayer[], chemistry: number): SquadStats {
   const gk = starters.find((s) => s.slot === 'GK');
   const defenders = starters.filter((s) => DEF_SLOTS.has(s.slot) && s.slot !== 'GK');
   const forwards = starters.filter((s) => ATT_SLOTS.has(s.slot));
@@ -56,16 +145,82 @@ function extractUserStats(squad: Squad): SquadStats {
     72
   );
   const gkRating = gk ? gk.player.overall : 72;
-
-  // Chemistry swings effective performance from ×0.80 (broken) to ×1.20 (perfect).
-  const chemMult = 0.8 + (squad.chemistry / 100) * 0.4;
+  const chemMult = 0.8 + (chemistry / 100) * 0.4;
 
   return { attack, midfield, defense, gk: gkRating, chemMult };
 }
 
-// Brutal opponents: real UCL clubs perform at (around) their full overall.
 function opponentStats(ovr: number): SquadStats {
   return { attack: ovr + 1, midfield: ovr - 1, defense: ovr, gk: ovr, chemMult: 1.0 };
+}
+
+// ─── AI "Manager" Automatic Substitutions ────────────────────────────────────
+
+interface ManagerSubPlan {
+  minute: number;
+  subOn: DraftedPlayer;
+  starterOff: DraftedPlayer;
+}
+
+/**
+ * Around 60'–76', the user's drafted Manager automatically brings on up to 3
+ * bench substitutes (from the 7-man bench) to replace fatigued or lower-rated
+ * outfield starters in compatible lines.
+ */
+function planManagerSubstitutions(rng: Rng, squad: Squad): ManagerSubPlan[] {
+  if (!squad.subs || squad.subs.length === 0) return [];
+  const usedStarterIndices = new Set<number>();
+  const usedSubIds = new Set<number>();
+  const plans: ManagerSubPlan[] = [];
+
+  const outfieldStarters = squad.starters.filter((s) => s.slot !== 'GK');
+  const outfieldSubs = squad.subs
+    .filter((s) => s.player.position !== 'GK')
+    .sort((a, b) => b.player.overall - a.player.overall);
+
+  const subWindows: [number, number][] = [
+    [58, 64],
+    [66, 73],
+    [75, 82],
+  ];
+
+  for (const sub of outfieldSubs) {
+    if (plans.length >= 3) break;
+    if (usedSubIds.has(sub.player.id)) continue;
+
+    const subGroup = playerPositionGroup(sub.player.position);
+    const candidates = outfieldStarters
+      .filter((st) => !usedStarterIndices.has(st.slotIndex))
+      .sort((a, b) => {
+        const aMatch = playerPositionGroup(a.player.position) === subGroup ? 0 : 1;
+        const bMatch = playerPositionGroup(b.player.position) === subGroup ? 0 : 1;
+        if (aMatch !== bMatch) return aMatch - bMatch;
+        return a.player.overall - b.player.overall;
+      });
+
+    const target = candidates[0];
+    if (!target) continue;
+
+    // Manager makes the sub if the bench player is higher/similar OVR or brings fresh legs (within 3 OVR)
+    if (sub.player.overall >= target.player.overall - 3 || plans.length < 2) {
+      const win = subWindows[plans.length] ?? [65, 78];
+      const minute = win[0] + rng.int(Math.max(1, win[1] - win[0]));
+      usedStarterIndices.add(target.slotIndex);
+      usedSubIds.add(sub.player.id);
+      plans.push({
+        minute,
+        subOn: {
+          ...sub,
+          slot: target.slot,
+          slotIndex: target.slotIndex,
+          chemistry: 5, // FUT 16 bench sub chemistry
+        },
+        starterOff: target,
+      });
+    }
+  }
+
+  return plans.sort((a, b) => a.minute - b.minute);
 }
 
 // ─── Shot-by-shot side simulation ──────────────────────────────────────────────
@@ -80,11 +235,6 @@ interface SideResult {
   goalMinutes: number[];
 }
 
-/**
- * Simulate one team's attacking output over a period: derive a realistic number
- * of shots from attacking power + possession, then resolve each shot into
- * on-target / big-chance / goal using the chance quality vs the opposing keeper.
- */
 function simulateSide(
   rng: Rng,
   attackPower: number,
@@ -96,7 +246,9 @@ function simulateSide(
   scale = 1
 ): SideResult {
   const shotBase = 3 + attackPower / 14;
-  let shots = Math.round((shotBase * (0.55 + possession / 100) * (1 + homeBonus) + gauss(rng) * 1.6) * scale);
+  let shots = Math.round(
+    (shotBase * (0.55 + possession / 100) * (1 + homeBonus) + gauss(rng) * 1.6) * scale
+  );
   shots = clamp(shots, scale < 1 ? 0 : 1, 22);
 
   let xg = 0;
@@ -107,13 +259,16 @@ function simulateSide(
   const goalMinutes: number[] = [];
 
   for (let i = 0; i < shots; i++) {
-    // Each shot's quality IS its xG — so a shot converts with that probability.
-    const quality = clamp(0.085 + (attackPower - defResist) / 400 + (rng.next() - 0.5) * 0.13, 0.02, 0.85);
+    const quality = clamp(
+      0.085 + (attackPower - defResist) / 400 + (rng.next() - 0.5) * 0.13,
+      0.02,
+      0.85
+    );
     xg += quality;
     if (quality > 0.3) bigChances++;
     if (rng.next() < quality) {
       goals++;
-      sot++; // goals are on target
+      sot++;
       goalMinutes.push(minuteLo + rng.int(Math.max(1, minuteHi - minuteLo)));
     } else if (rng.next() < clamp(0.33 + attackPower / 300, 0.2, 0.62)) {
       sot++;
@@ -136,27 +291,57 @@ const GOAL_TEMPLATES = [
   (n: string) => `${n} converts the rebound after a parried shot. GOAL!`,
 ];
 const SAVE_TEMPLATES = [
-  (n: string) => `Huge save to deny ${n} from range!`,
-  (n: string) => `The keeper tips ${n}'s effort onto the post!`,
-  (n: string) => `Point-blank stop keeps ${n} out!`,
+  (n: string) => `Huge reflex save to deny ${n} from point-blank range!`,
+  (n: string) => `The keeper fingertips ${n}'s curling effort onto the post!`,
+  (n: string) => `Acrobatic diving stop keeps ${n} out!`,
 ];
 const CHANCE_TEMPLATES = [
-  (n: string) => `${n} drags it just wide of the far post.`,
-  (n: string) => `${n} rattles the crossbar — so close!`,
-  (n: string) => `${n} blazes over from the edge of the box.`,
+  (n: string) => `${n} drags a fierce strike just wide of the far post.`,
+  (n: string) => `${n} rattles the crossbar from 22 yards — inches away!`,
+  (n: string) => `${n} slices over the bar from the edge of the area.`,
 ];
-const CARD_TEMPLATES = [(n: string) => `${n} goes into the book for a cynical foul.`];
+const CARD_TEMPLATES = [
+  (n: string) => `${n} goes into the referee's book for a tactical foul.`,
+  (n: string) => `Yellow card shown to ${n} after a late sliding challenge.`,
+];
 
-function pickScorer(rng: Rng, squad: Squad): DraftedPlayer {
-  const fwd = squad.starters.filter(
+function pickScorerAtMinute(
+  rng: Rng,
+  starters: DraftedPlayer[],
+  subPlans: ManagerSubPlan[],
+  minute: number
+): DraftedPlayer {
+  const activeLineup = starters.map((st) => {
+    const activeSub = subPlans.find(
+      (sp) => sp.starterOff.slotIndex === st.slotIndex && sp.minute <= minute
+    );
+    return activeSub ? activeSub.subOn : st;
+  });
+
+  const fwd = activeLineup.filter(
     (s) => ATT_SLOTS.has(s.slot) || ['CAM', 'LCAM', 'RCAM', 'CCAM'].includes(s.slot)
   );
-  const pool = fwd.length ? fwd : squad.starters;
-  const total = pool.reduce((a, p) => a + p.player.sho, 0) || 1;
+  const pool = fwd.length ? fwd : activeLineup.filter((s) => s.slot !== 'GK');
+  const safePool = pool.length ? pool : activeLineup;
+  const total = safePool.reduce((a, p) => a + Math.max(40, p.player.sho), 0) || 1;
   let r = rng.next() * total;
-  for (const p of pool) {
-    r -= p.player.sho;
+  for (const p of safePool) {
+    r -= Math.max(40, p.player.sho);
     if (r <= 0) return p;
+  }
+  return safePool[safePool.length - 1]!;
+}
+
+/** Pick an outfield player weighted toward defenders/CDMs for bookings (never GK). */
+function pickUserBookedPlayer(rng: Rng, starters: DraftedPlayer[]): DraftedPlayer {
+  const outfield = starters.filter((s) => s.slot !== 'GK');
+  const pool = outfield.length ? outfield : starters;
+  const weights = pool.map((s) => (DEF_SLOTS.has(s.slot) ? 3.0 : ATT_SLOTS.has(s.slot) ? 1.0 : 2.2));
+  const total = weights.reduce((a, b) => a + b, 0) || 1;
+  let r = rng.next() * total;
+  for (let i = 0; i < pool.length; i++) {
+    r -= weights[i]!;
+    if (r <= 0) return pool[i]!;
   }
   return pool[pool.length - 1]!;
 }
@@ -178,8 +363,8 @@ function generateRatings(
     if (userWon) r += 0.4;
     const isDef = DEF_SLOTS.has(dp.slot);
     if (isDef) {
-      if (oppGoals === 0) r += 0.7; // clean sheet
-      else r -= 0.18 * oppGoals; // shipped goals
+      if (oppGoals === 0) r += 0.7;
+      else r -= 0.18 * oppGoals;
     }
     const isMid = !isDef && !ATT_SLOTS.has(dp.slot);
     if (isMid && possession > 55) r += 0.3;
@@ -195,7 +380,6 @@ function simulatePenalties(
   userGk: number,
   oppGk: number
 ): { userWon: boolean; userPens: number; oppPens: number } {
-  // Higher opposing keeper rating lowers your conversion.
   const userConv = clamp(0.82 - oppGk / 600, 0.6, 0.85);
   const oppConv = clamp(0.82 - userGk / 600, 0.6, 0.85);
   let u = 0;
@@ -227,69 +411,130 @@ export function simulateMatch(
   opponent: BracketTeam,
   roundIndex: number // 0=R16 … 3=Final
 ): MatchResult {
-  const u = extractUserStats(userSquad);
+  const subPlans = planManagerSubstitutions(rng, userSquad);
+  const mgrName = userSquad.manager?.name ?? 'Manager';
+
+  // Effective squad includes a fresh-legs boost in the final third of the match from bench subs
+  const u = extractUserStats(userSquad.starters, userSquad.chemistry);
+  const subBoost = subPlans.length * 0.65;
   const o = opponentStats(opponent.ovr);
   const home = roundIndex <= 2 ? 0.08 : 0;
 
-  // Possession from the midfield battle (chemistry-boosted for the user).
-  const um = u.midfield * u.chemMult;
+  const um = (u.midfield + subBoost * 0.5) * u.chemMult;
   const possession = clamp(Math.round(50 + ((um - o.midfield) / (um + o.midfield)) * 40), 28, 72);
 
   const userDefResist = o.defense * 0.7 + o.gk * 0.3;
-  const oppDefResist = (u.defense * 0.7 + u.gk * 0.3) * u.chemMult;
+  const oppDefResist = ((u.defense + subBoost * 0.3) * 0.7 + u.gk * 0.3) * u.chemMult;
 
-  const userSide = simulateSide(rng, u.attack * u.chemMult, userDefResist, possession, home, 6, 90);
+  const userSide = simulateSide(
+    rng,
+    (u.attack + subBoost) * u.chemMult,
+    userDefResist,
+    possession,
+    home,
+    6,
+    90
+  );
   const oppSide = simulateSide(rng, o.attack, oppDefResist, 100 - possession, 0, 6, 90);
 
   let userScore = Math.min(userSide.goals, 7);
   let oppScore = Math.min(oppSide.goals, 7);
 
-  // Build the event timeline.
   const events: MatchEvent[] = [];
   const scorerIds = new Map<number, number>();
+
+  // Emit AI Manager Substitution events
+  for (const plan of subPlans) {
+    events.push({
+      minute: plan.minute,
+      type: 'SUBSTITUTION',
+      description: `${plan.minute}' — Tactical Sub (${mgrName}): ${plan.subOn.player.name} (${plan.subOn.player.overall}) replaces ${plan.starterOff.player.name}`,
+      isUserTeam: true,
+      isGoal: false,
+    });
+  }
 
   const addGoals = (count: number, minutes: number[], isUser: boolean) => {
     for (let i = 0; i < count; i++) {
       const minute = minutes[i] ?? 6 + rng.int(84);
       if (isUser) {
-        const scorer = pickScorer(rng, userSquad);
+        const scorer = pickScorerAtMinute(rng, userSquad.starters, subPlans, minute);
         scorerIds.set(scorer.player.id, (scorerIds.get(scorer.player.id) ?? 0) + 1);
-        events.push({ minute, type: 'GOAL', description: `${minute}' — ${rng.pick(GOAL_TEMPLATES)(scorer.player.name)}`, isUserTeam: true, isGoal: true });
+        const isSubScorer = subPlans.some(
+          (sp) => sp.subOn.player.id === scorer.player.id && sp.minute <= minute
+        );
+        const subTag = isSubScorer ? ' (Sub impact!)' : '';
+        events.push({
+          minute,
+          type: 'GOAL',
+          description: `${minute}' — ${rng.pick(GOAL_TEMPLATES)(scorer.player.name)}${subTag}`,
+          isUserTeam: true,
+          isGoal: true,
+        });
       } else {
-        events.push({ minute, type: 'GOAL', description: `${minute}' — ${rng.pick(GOAL_TEMPLATES)(opponent.name)}`, isUserTeam: false, isGoal: true });
+        const oppScorer = pickOpponentAttacker(rng, opponent);
+        events.push({
+          minute,
+          type: 'GOAL',
+          description: `${minute}' — ${rng.pick(GOAL_TEMPLATES)(oppScorer)}`,
+          isUserTeam: false,
+          isGoal: true,
+        });
       }
     }
   };
   addGoals(userScore, userSide.goalMinutes, true);
   addGoals(oppScore, oppSide.goalMinutes, false);
 
-  // Flavour: a couple of saves (shots on target that weren't goals) and chances.
   const flavour = (side: SideResult, isUser: boolean) => {
     const saves = clamp(side.sot - side.goals, 0, 2);
     for (let i = 0; i < saves; i++) {
       const minute = 5 + rng.int(85);
-      const name = isUser ? pickScorer(rng, userSquad).player.name : opponent.name;
-      events.push({ minute, type: 'SAVE', description: `${minute}' — ${rng.pick(SAVE_TEMPLATES)(name)}`, isUserTeam: isUser, isGoal: false });
+      const name = isUser
+        ? pickScorerAtMinute(rng, userSquad.starters, subPlans, minute).player.name
+        : pickOpponentAttacker(rng, opponent);
+      events.push({
+        minute,
+        type: 'SAVE',
+        description: `${minute}' — ${rng.pick(SAVE_TEMPLATES)(name)}`,
+        isUserTeam: isUser,
+        isGoal: false,
+      });
     }
     if (side.shots - side.sot > 1 && rng.next() < 0.7) {
       const minute = 5 + rng.int(85);
-      const name = isUser ? pickScorer(rng, userSquad).player.name : opponent.name;
-      events.push({ minute, type: 'CHANCE', description: `${minute}' — ${rng.pick(CHANCE_TEMPLATES)(name)}`, isUserTeam: isUser, isGoal: false });
+      const name = isUser
+        ? pickScorerAtMinute(rng, userSquad.starters, subPlans, minute).player.name
+        : pickOpponentAttacker(rng, opponent);
+      events.push({
+        minute,
+        type: 'CHANCE',
+        description: `${minute}' — ${rng.pick(CHANCE_TEMPLATES)(name)}`,
+        isUserTeam: isUser,
+        isGoal: false,
+      });
     }
   };
   flavour(userSide, true);
   flavour(oppSide, false);
 
-  // 0–2 bookings.
+  // 0–2 bookings (strictly outfield players, weighted toward defenders/midfielders).
   const cards = rng.int(3);
   for (let i = 0; i < cards; i++) {
     const isUser = rng.next() < 0.5;
-    const minute = 10 + rng.int(80);
-    const name = isUser ? rng.pick(userSquad.starters).player.name : opponent.name;
-    events.push({ minute, type: 'YELLOW_CARD', description: `${minute}' — ${rng.pick(CARD_TEMPLATES)(name)}`, isUserTeam: isUser, isGoal: false });
+    const minute = 12 + rng.int(76);
+    const name = isUser
+      ? pickUserBookedPlayer(rng, userSquad.starters).player.name
+      : pickOpponentFoulPlayer(rng, opponent);
+    events.push({
+      minute,
+      type: 'YELLOW_CARD',
+      description: `${minute}' — ${rng.pick(CARD_TEMPLATES)(name)}`,
+      isUserTeam: isUser,
+      isGoal: false,
+    });
   }
 
-  // Extra time + penalties on a draw.
   let wentToET = false;
   let wentToPenalties = false;
   let userPenScore: number | undefined;
@@ -298,7 +543,16 @@ export function simulateMatch(
 
   if (userScore === oppScore) {
     wentToET = true;
-    const etUser = simulateSide(rng, u.attack * u.chemMult, userDefResist, possession, home, 91, 120, 0.33);
+    const etUser = simulateSide(
+      rng,
+      (u.attack + subBoost) * u.chemMult,
+      userDefResist,
+      possession,
+      home,
+      91,
+      120,
+      0.33
+    );
     const etOpp = simulateSide(rng, o.attack, oppDefResist, 100 - possession, 0, 91, 120, 0.33);
     addGoals(etUser.goals, etUser.goalMinutes, true);
     addGoals(etOpp.goals, etOpp.goalMinutes, false);
@@ -319,7 +573,14 @@ export function simulateMatch(
 
   events.sort((a, b) => a.minute - b.minute);
 
-  const ratings = generateRatings(rng, userSquad.starters, scorerIds, oppScore, possession, userWon);
+  const ratings = generateRatings(
+    rng,
+    userSquad.starters,
+    scorerIds,
+    oppScore,
+    possession,
+    userWon
+  );
   const motm = ratings.reduce((best, r) => (r.rating > best.rating ? r : best));
 
   return {

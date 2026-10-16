@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { clsx } from 'clsx';
 import type { Player, Formation, ChemistryPreview, Squad } from '@/types';
 import type { ActiveSlot } from '@/hooks/useDraft';
@@ -10,6 +10,12 @@ import { Button } from '@/components/ui/Button';
 import { DraftSideAction } from '@/components/draft/DraftSideAction';
 import { SquadTab } from '@/components/draft/SquadTab';
 import { SquadShareActions } from '@/components/draft/SquadShareActions';
+import {
+  calculateChemistry,
+  getAdjacency,
+  linkQuality,
+} from '@/engine/chemistryEngine';
+import { startersDrafted, weightedRating } from '@/engine/draftMachine';
 
 interface DraftScreenProps {
   formation: Formation;
@@ -39,17 +45,80 @@ interface DraftScreenProps {
   onPlayPick?: () => void;
 }
 
-function Counter({ label, value, color }: { label: string; value: number; color: string }) {
+/**
+ * FIFA 16 Star Rating Indicator (0.5 to 5.0 stars based on Squad Rating).
+ */
+function StarMeter({ rating }: { rating: number }) {
+  const stars = rating >= 83 ? 5 : rating >= 78 ? 4.5 : rating >= 74 ? 4 : rating > 0 ? 3.5 : 0;
   return (
-    <div className="stat-pod text-center">
-      <div
-        className="font-display font-bold leading-none draft-stat-value"
-        style={{ color }}
-      >
-        {value}
+    <div className="flex items-center gap-[2px]" aria-label={`${stars} stars`}>
+      {Array.from({ length: 5 }, (_, i) => {
+        const filled = stars >= i + 1;
+        const half = !filled && stars >= i + 0.5;
+        return (
+          <span
+            key={i}
+            className="text-[10px] leading-none"
+            style={{ color: filled || half ? '#e2ae16' : 'rgba(255,255,255,0.2)' }}
+          >
+            ★
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Authentic FIFA 16 HUD Pod for Rating (with 5-star bar) and Chemistry (with 0–100 bar).
+ */
+function FifaHudPod({
+  label,
+  value,
+  delta,
+  color,
+  mode,
+}: {
+  label: string;
+  value: number;
+  delta?: number;
+  color: string;
+  mode: 'rating' | 'chemistry';
+}) {
+  const barPct = Math.max(0, Math.min(100, value));
+  return (
+    <div className="stat-pod min-w-[116px] sm:min-w-[144px]">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-display tracking-widest text-white/60 uppercase draft-stat-label">
+          {label}
+        </span>
+        <div className="flex items-baseline gap-1">
+          <span
+            className="font-display font-bold leading-none draft-stat-value tabular-nums"
+            style={{ color }}
+          >
+            {value}
+          </span>
+          {delta !== undefined && delta !== 0 && (
+            <span
+              className={clsx(
+                'font-display font-bold text-xs tabular-nums',
+                delta > 0 ? 'text-ucl-green' : 'text-ucl-red'
+              )}
+            >
+              {delta > 0 ? `+${delta}` : delta}
+            </span>
+          )}
+        </div>
       </div>
-      <div className="font-display tracking-widest text-white/40 uppercase mt-0.5 draft-stat-label">
-        {label}
+      <div className="mt-1 flex items-center justify-between gap-1.5">
+        {mode === 'rating' && <StarMeter rating={value} />}
+        <div className="flex-1 h-1.5 bg-black/55 rounded-[1px] overflow-hidden border border-white/10">
+          <div
+            className="h-full transition-all duration-300"
+            style={{ width: `${barPct}%`, backgroundColor: color }}
+          />
+        </div>
       </div>
     </div>
   );
@@ -89,11 +158,131 @@ export function DraftScreen(props: DraftScreenProps) {
 
   const [draggingSlot, setDraggingSlot] = useState<ActiveSlot | null>(null);
   const [swapSource, setSwapSource] = useState<ActiveSlot | null>(null);
+  const [hoveredSlot, setHoveredSlot] = useState<ActiveSlot | null>(null);
+  const [hoveredCandidate, setHoveredCandidate] = useState<Player | null>(null);
   const [squadPreview, setSquadPreview] = useState(false);
   const picking = !reviewMode && (awaitingCaptain || !!activeSlot);
 
+  const handleHoverCandidate = useCallback((p: Player | null) => {
+    setHoveredCandidate(p);
+  }, []);
+
+  /**
+   * Live Hypothetical Board State:
+   * - When hovering a candidate card in the 5-card ribbon, project that player
+   *   onto the active slot so the pitch shows live Green/Orange/Red chemistry link lines!
+   * - When a swap source is selected and hovering another slot, preview the swap live!
+   */
+  const { displayStarters, displayBench, displayChem, displayRating } = useMemo(() => {
+    if (picking && hoveredCandidate && activeSlot) {
+      const nextStarters = [...starterPlayers];
+      const nextBench = [...benchPlayers];
+      if (activeSlot.zone === 'starter') {
+        nextStarters[activeSlot.index] = hoveredCandidate;
+      } else {
+        nextBench[activeSlot.index] = hoveredCandidate;
+      }
+      const previewChem =
+        activeSlot.zone === 'starter'
+          ? calculateChemistry(startersDrafted(nextStarters, formation), formation, shareSquad?.manager)
+          : chemPreview;
+      const previewRating = weightedRating(nextStarters, nextBench);
+      return {
+        displayStarters: nextStarters,
+        displayBench: nextBench,
+        displayChem: previewChem,
+        displayRating: previewRating,
+      };
+    }
+
+    if (!picking && swapSource && hoveredSlot && !sameSlot(swapSource, hoveredSlot)) {
+      const nextStarters = [...starterPlayers];
+      const nextBench = [...benchPlayers];
+      const get = (s: ActiveSlot) =>
+        s.zone === 'starter' ? nextStarters[s.index] : nextBench[s.index];
+      const set = (s: ActiveSlot, p: Player | null) => {
+        if (s.zone === 'starter') nextStarters[s.index] = p;
+        else nextBench[s.index] = p;
+      };
+      const pa = get(swapSource) ?? null;
+      const pb = get(hoveredSlot) ?? null;
+      if (pa || pb) {
+        set(swapSource, pb);
+        set(hoveredSlot, pa);
+        return {
+          displayStarters: nextStarters,
+          displayBench: nextBench,
+          displayChem: calculateChemistry(
+            startersDrafted(nextStarters, formation),
+            formation,
+            shareSquad?.manager
+          ),
+          displayRating: weightedRating(nextStarters, nextBench),
+        };
+      }
+    }
+
+    return {
+      displayStarters: starterPlayers,
+      displayBench: benchPlayers,
+      displayChem: chemPreview,
+      displayRating: squadRating,
+    };
+  }, [
+    picking,
+    hoveredCandidate,
+    activeSlot,
+    swapSource,
+    hoveredSlot,
+    starterPlayers,
+    benchPlayers,
+    formation,
+    chemPreview,
+    squadRating,
+    shareSquad?.manager,
+  ]);
+
+  /**
+   * FIFA 16 "Fade Unaffected Players" Swap Mode:
+   * When `swapSource` is selected, dim any starter slot that doesn't link to
+   * the swap source/target or share a club/league/nation link with the selected player.
+   */
+  const dimmedStarterIndices = useMemo(() => {
+    if (!swapSource) return undefined;
+    const selectedPlayer =
+      swapSource.zone === 'starter'
+        ? starterPlayers[swapSource.index]
+        : benchPlayers[swapSource.index];
+    if (!selectedPlayer) return undefined;
+
+    const adj = getAdjacency(formation);
+    const affected = new Set<number>();
+
+    if (swapSource.zone === 'starter') {
+      affected.add(swapSource.index);
+      for (const n of adj[swapSource.index] ?? []) affected.add(n);
+    }
+    if (hoveredSlot?.zone === 'starter') {
+      affected.add(hoveredSlot.index);
+      for (const n of adj[hoveredSlot.index] ?? []) affected.add(n);
+    }
+
+    starterPlayers.forEach((p, idx) => {
+      if (!p) return;
+      if (linkQuality(selectedPlayer, p) !== 'red') {
+        affected.add(idx);
+      }
+    });
+
+    const dimmed = new Set<number>();
+    for (let i = 0; i < formation.positions.length; i++) {
+      if (!affected.has(i)) dimmed.add(i);
+    }
+    return dimmed;
+  }, [swapSource, hoveredSlot, starterPlayers, benchPlayers, formation]);
+
   const chemColor =
-    chemPreview.total > 75 ? '#16d36a' : chemPreview.total >= 50 ? '#e0a000' : '#d63a3a';
+    displayChem.total > 75 ? '#79b928' : displayChem.total >= 50 ? '#e2ae16' : '#e0473b';
 
   function isOccupied(s: ActiveSlot) {
     return s.zone === 'starter' ? !!starterPlayers[s.index] : !!benchPlayers[s.index];
@@ -111,6 +300,7 @@ export function DraftScreen(props: DraftScreenProps) {
         onSwapSlots(swapSource, s);
         onPlayClick?.();
         setSwapSource(null);
+        setHoveredSlot(null);
         return;
       }
       setSwapSource(null);
@@ -135,6 +325,7 @@ export function DraftScreen(props: DraftScreenProps) {
     }
     setDraggingSlot(null);
     setSwapSource(null);
+    setHoveredSlot(null);
   }
 
   const benchRole = activeSlot?.zone === 'bench' ? benchGroups[activeSlot.index] : '';
@@ -145,24 +336,29 @@ export function DraftScreen(props: DraftScreenProps) {
       : activeSlot?.zone === 'bench'
         ? isReservePick
           ? 'Reserve'
-          : 'Substitute'
+          : `Substitute (${benchRole})`
         : '';
   const activeGroup =
     activeSlot?.zone === 'starter' ? formation.positions[activeSlot.index]?.positionGroup : undefined;
 
   function handlePickCaptain(p: Player) {
+    setHoveredCandidate(null);
     onPlayPick?.();
     onPickCaptain(p);
   }
 
   function handlePickPlayer(p: Player) {
+    setHoveredCandidate(null);
     onPlayPick?.();
     onPickPlayer(p);
   }
 
   const showQuickSim = !reviewMode && !!onQuickSimToReview;
   const showSubmit = reviewMode && !!onQuickSimToReview;
-  const pickTitle = awaitingCaptain ? 'Pick Captain' : `Pick ${activeLabel}`;
+  const pickTitle = awaitingCaptain ? 'Choose Your Captain' : `Select Player — ${activeLabel}`;
+
+  const chemDelta = displayChem.total - chemPreview.total;
+  const ratingDelta = displayRating - squadRating;
 
   return (
     <div
@@ -189,20 +385,34 @@ export function DraftScreen(props: DraftScreenProps) {
         />
       )}
 
-      <div className="flex items-center justify-between w-full mb-[clamp(2px,0.8cqh,8px)] shrink-0 gap-2 px-[clamp(4px,2cqw,16px)]">
-        <Counter label="Rating" value={squadRating} color="#ffffff" />
+      {/* FIFA 16 Top Broadcast HUD: Rating Pod | Formation & Progress | Chemistry Pod */}
+      <div className="flex items-center justify-between w-full mb-[clamp(2px,0.8cqh,8px)] shrink-0 gap-2 px-[clamp(4px,2cqw,16px)] z-40">
+        <FifaHudPod
+          label="Rating"
+          value={displayRating}
+          delta={ratingDelta}
+          color="#e2ae16"
+          mode="rating"
+        />
         <div className="text-center min-w-0 flex-1">
-          <div className="font-display text-white/30 uppercase tracking-widest truncate draft-header-sub">
+          <div className="font-display text-white/45 uppercase tracking-widest truncate draft-header-sub">
             {formation.name}
-            {reviewMode && managerName ? ` · ${managerName}` : ''}
+            {reviewMode && managerName ? ` · MGR: ${managerName}` : ''}
           </div>
           <div className="font-display font-bold text-accent draft-header-main">
-            {reviewMode ? 'FINAL SQUAD' : `${filledCount}/23`}
+            {reviewMode ? 'FINAL SQUAD' : `FUT DRAFT · ${filledCount}/23`}
           </div>
         </div>
-        <Counter label="Chemistry" value={chemPreview.total} color={chemColor} />
+        <FifaHudPod
+          label="Chemistry"
+          value={displayChem.total}
+          delta={chemDelta}
+          color={chemColor}
+          mode="chemistry"
+        />
       </div>
 
+      {/* Pitch & Bench Board — stays sharp so live chemistry links shine behind the 5-card ribbon */}
       <div
         className={clsx(
           'flex-1 min-h-0 flex flex-col justify-center overflow-hidden w-full mx-auto draft-board-wrap',
@@ -212,14 +422,16 @@ export function DraftScreen(props: DraftScreenProps) {
       >
         <SquadBoard
           formation={formation}
-          starterPlayers={starterPlayers}
-          benchPlayers={benchPlayers}
+          starterPlayers={displayStarters}
+          benchPlayers={displayBench}
           subsCount={subsCount}
-          chem={chemPreview}
+          chem={displayChem}
           activeSlot={activeSlot}
           draggingSlot={draggingSlot}
           swapSource={swapSource}
+          dimmedStarterIndices={dimmedStarterIndices}
           onSlotClick={handleSlotClick}
+          onSlotHover={setHoveredSlot}
           onDragStart={(s) => {
             setSwapSource(null);
             setDraggingSlot(s);
@@ -229,7 +441,7 @@ export function DraftScreen(props: DraftScreenProps) {
       </div>
 
       {!picking && (
-        <div className="shrink-0 mt-1 flex flex-col items-center gap-2 pb-[env(safe-area-inset-bottom)] px-2">
+        <div className="shrink-0 mt-1 flex flex-col items-center gap-1.5 pb-[env(safe-area-inset-bottom)] px-2">
           {reviewMode && shareSquad && (
             <SquadShareActions squad={shareSquad} resultLabel="Draft" compact />
           )}
@@ -243,18 +455,27 @@ export function DraftScreen(props: DraftScreenProps) {
               }}
               className="font-display tracking-widest uppercase text-sm"
             >
-              △ Complete Squad
+              △ Lock Squad & Pick Manager
             </Button>
           )}
-          <p className="text-center font-body text-white/40 leading-snug px-2 draft-hint">
+          <p className="text-center font-body text-white/45 leading-snug px-2 draft-hint">
             {swapSource ? (
-              <>Tap another player to <span className="text-gold">swap</span></>
+              <>
+                Swap mode active (unaffected players dimmed) — tap another slot to{' '}
+                <span className="text-gold">swap</span>
+              </>
             ) : reviewMode ? (
-              <>Rearrange, then <span className="text-gold">Submit</span> on the right</>
+              <>
+                Rearrange starters & bench for max chemistry, then click{' '}
+                <span className="text-gold">Submit</span>
+              </>
             ) : allFilled ? (
-              <>All 23 picked — <span className="text-gold">Complete Squad</span></>
+              <>
+                All 23 players drafted — click{' '}
+                <span className="text-gold">Lock Squad & Pick Manager</span>
+              </>
             ) : (
-              <>Click empty slot to draft · drag to rearrange</>
+              <>Click any empty slot to draft 1 of 5 players · click or drag players to swap</>
             )}
           </p>
         </div>
@@ -278,18 +499,29 @@ export function DraftScreen(props: DraftScreenProps) {
           />
 
           {!squadPreview && (
-            <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 z-40 draft-pick-band">
+            <div className="absolute inset-x-0 bottom-[clamp(42px,8cqh,76px)] z-40 draft-pick-band">
               <div className="draft-pick-band__inner">
-                <div className="draft-pick-band__title font-display font-bold uppercase text-gold text-center">
-                  {pickTitle}
+                <div className="flex items-center justify-between px-2 mb-1">
+                  <div className="draft-pick-band__title font-display font-bold uppercase text-gold">
+                    {pickTitle}
+                  </div>
+                  <span className="font-display text-[10px] uppercase tracking-widest text-white/55 hidden sm:inline">
+                    Hover a card to preview live pitch chemistry links · Hold [RT] Squad to inspect
+                  </span>
                 </div>
                 <div className="draft-pick-band__cards">
                   {awaitingCaptain ? (
-                    <CardChooser cards={currentCards} onPick={handlePickCaptain} fluid />
+                    <CardChooser
+                      cards={currentCards}
+                      onPick={handlePickCaptain}
+                      onHoverCandidate={handleHoverCandidate}
+                      fluid
+                    />
                   ) : (
                     <CardChooser
                       cards={currentCards}
                       onPick={handlePickPlayer}
+                      onHoverCandidate={handleHoverCandidate}
                       chemForCandidate={getChemPreviewForCandidate}
                       baseChem={chemPreview.total}
                       slotGroup={activeGroup}
@@ -303,8 +535,8 @@ export function DraftScreen(props: DraftScreenProps) {
 
           {squadPreview && (
             <div className="absolute bottom-[clamp(8px,2cqh,20px)] left-0 right-0 z-40 text-center pointer-events-none">
-              <span className="font-display text-[10px] uppercase tracking-[0.3em] text-white/45">
-                Release Squad to pick
+              <span className="font-display text-[10px] uppercase tracking-[0.3em] text-gold/85 bg-black/70 px-3 py-1 rounded-[2px] border border-gold/30">
+                Inspecting Pitch — Release Squad Tab to Return to Picks
               </span>
             </div>
           )}

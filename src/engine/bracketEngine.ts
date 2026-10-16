@@ -20,6 +20,7 @@ const UCL_CLUBS: Omit<BracketTeam, 'seed'>[] = [
   { id: 'juventus', name: 'Juventus', ovr: 81, isUser: false, badgeUrl: badge(45) },
   { id: 'porto', name: 'Porto', ovr: 80, isUser: false, badgeUrl: badge(236) },
   { id: 'benfica', name: 'Benfica', ovr: 80, isUser: false, badgeUrl: badge(234) },
+  { id: 'liverpool', name: 'Liverpool', ovr: 86, isUser: false, badgeUrl: badge(9) },
   { id: 'monaco', name: 'Monaco', ovr: 79, isUser: false, badgeUrl: badge(69) },
 ];
 

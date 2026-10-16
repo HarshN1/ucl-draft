@@ -35,10 +35,20 @@ export function makeTestSquad(overrides?: Partial<Squad>): Squad {
     leagueName: 'Premier League',
   };
 
+  const subs: DraftedPlayer[] = [
+    drafted(makePlayer('GK', 82), 'SUB', 0, 5),
+    drafted(makePlayer('CB', 84), 'SUB', 1, 5),
+    drafted(makePlayer('LB', 83), 'SUB', 2, 5),
+    drafted(makePlayer('CM', 86), 'SUB', 3, 5),
+    drafted(makePlayer('CAM', 85), 'SUB', 4, 5),
+    drafted(makePlayer('ST', 87), 'SUB', 5, 5),
+    drafted(makePlayer('RW', 85), 'SUB', 6, 5),
+  ];
+
   return {
     formation: FORMATION_433,
     starters,
-    subs: [],
+    subs,
     reserves: [],
     manager,
     teamName: 'Test United',

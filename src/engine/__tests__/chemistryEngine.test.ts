@@ -55,6 +55,11 @@ describe('positionCategory', () => {
     expect(positionCategory('CM', 'ST')).toBe('outOfRole');
     expect(positionCategory('GK', 'ST')).toBe('wrong');
   });
+
+  it('upgrades fit to related when altPositions matches the slot group', () => {
+    expect(positionCategory('ST', 'WG', ['LW', 'CF'])).toBe('related');
+    expect(isInPosition('CM', 'FB', ['RB'])).toBe(true);
+  });
 });
 
 describe('linkIntensity & linkQuality', () => {
@@ -70,6 +75,40 @@ describe('linkIntensity & linkQuality', () => {
     const b = { ...DE_BRUYNE, clubName: 'City', nationalityName: 'Belgium' };
     expect(linkIntensity(a, b)).toBe(1);
     expect(linkQuality(a, b)).toBe('green');
+  });
+
+  it('links cross-source league variants (e.g. La Liga and LALIGA EA SPORTS)', () => {
+    const a = { ...HAALAND, clubName: 'Real Madrid', leagueName: 'La Liga', nationalityName: 'France' };
+    const b = { ...DE_BRUYNE, clubName: 'FC Barcelona', leagueName: 'LALIGA EA SPORTS', nationalityName: 'France' };
+    expect(linkIntensity(a, b)).toBe(1);
+    expect(linkQuality(a, b)).toBe('green');
+  });
+
+  it('gives FUT Heroes strong league links and ignores pseudo-club HERO matches', () => {
+    const heroPremier = {
+      ...HAALAND,
+      id: 5001,
+      clubName: 'HERO',
+      leagueName: 'Premier League',
+      nationalityName: 'France',
+      cardType: 'hero' as const,
+    };
+    const heroSerieA = {
+      ...DE_BRUYNE,
+      id: 5002,
+      clubName: 'HERO',
+      leagueName: 'Serie A TIM',
+      nationalityName: 'Italy',
+      cardType: 'hero' as const,
+    };
+    const plPlayer = {
+      ...VAN_DIJK,
+      clubName: 'Liverpool',
+      leagueName: 'Premier League',
+      nationalityName: 'Netherlands',
+    };
+    expect(linkIntensity(heroPremier, plPlayer)).toBe(1);
+    expect(linkIntensity(heroPremier, heroSerieA)).toBe(-1);
   });
 
   it('treats legends as chemistry bridges', () => {

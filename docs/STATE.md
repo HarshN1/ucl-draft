@@ -1,6 +1,6 @@
 # STATE
 
-Last corrected: 2026-09-15 (Phase 0–1 landed).
+Last corrected: 2026-10-16 (FIFA 16 Authenticity & 2026/27 Men's-Only Upgrade landed).
 
 ## Broken right now
 
@@ -19,9 +19,9 @@ Production: `ucl-draft-lemon.vercel.app`
 |---|---|---|
 | 0 Repo hygiene | almost done | 0.1–0.3, 0.5–0.6 done. **0.4** Vercel Git/env confirmation remains. |
 | 1 Determinism + resume | done | Seeded Rng, draftMachine, persist, resume UI, Playwright spec. |
-| 2 Chemistry + rating | partial | Still approximate chem; weighted rating not FUT 18-player CF. |
-| 3 Draw engine | partial | Rng-threaded; still inline bands/affinity (not config tables). |
-| 4–12 | unchanged | See prior audit; next work starts at Phase 2. |
+| 2 Chemistry + rating | done | Exact FUT 16 link rules (Hero/Icon/cross-source leagues, altPositions) + 18-player Squad Rating CF formula. |
+| 3 Draw engine | done | Seeded 5-card FIFA 16 draw (2 neighbour-chem + 2 band base + 1 marquee/special, Captain 88+ mix, GK->ATT bench). |
+| 4–8 Data, Sim, UI & Cards | done | 2026/27 Men's-only pool + TOTY/TOTS/MOTM/FUTTIES, FIFA 16 cards & 3D pitch HUD, live link hover preview, fast-sim with Manager auto-subs & big-event slowdown. |
 
 ## Architecture as it actually is
 
