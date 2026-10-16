@@ -22,6 +22,22 @@ const VERSIONS = [
   { slug: 'thunderstruck_icon', cardType: 'thunderstruck_icon', promoLabel: 'Thunderstruck ICON', isLegend: true },
 ];
 
+const WOMENS_LEAGUES = new Set([
+  'Barclays WSL',
+  'D1 Arkema',
+  'Liga F',
+  'GPFBL',
+  'NWSL',
+  'Calcio A Femminile',
+  'Arkema Première Ligue',
+  'Google Pixel Frauen-Bundesliga',
+]);
+
+const WOMENS_ICON_IDS = new Set([
+  275243, 275276, 226293, 226301, 227006, 227324, 226975,
+  227002, 71608, 226369, 227263, 77676, 71587,
+]);
+
 const ISO_OVERRIDE = {
   Egypt: 'eg',
   'Czech Republic': 'cz',
@@ -128,7 +144,11 @@ async function fetchVersion(meta) {
       const rid = Number(row.resource_id ?? row.ID);
       if (seen.has(rid)) continue;
       seen.add(rid);
-      players.push(mapRow(row, meta));
+      const mapped = mapRow(row, meta);
+      if (WOMENS_LEAGUES.has(mapped.leagueName) || WOMENS_ICON_IDS.has(mapped.basePlayerId)) {
+        continue;
+      }
+      players.push(mapped);
     }
 
     process.stdout.write(`  ${meta.slug}: page ${page} (${players.length} cards)\r`);

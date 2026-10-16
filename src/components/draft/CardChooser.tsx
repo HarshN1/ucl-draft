@@ -9,6 +9,7 @@ import { positionCategory } from '@/engine/chemistryEngine';
 interface CardChooserProps {
   cards: Player[];
   onPick: (player: Player) => void;
+  onHoverCandidate?: (player: Player | null) => void;
   chemForCandidate?: (player: Player) => number;
   baseChem?: number;
   slotGroup?: string;
@@ -19,6 +20,7 @@ interface CardChooserProps {
 export function CardChooser({
   cards,
   onPick,
+  onHoverCandidate,
   chemForCandidate,
   baseChem = 0,
   slotGroup,
@@ -28,11 +30,13 @@ export function CardChooser({
 
   useEffect(() => {
     setPicked(null);
-  }, [cards]);
+    onHoverCandidate?.(null);
+  }, [cards, onHoverCandidate]);
 
   function handle(p: Player, idx: number) {
     if (picked !== null) return;
     setPicked(idx);
+    onHoverCandidate?.(null);
     setTimeout(() => onPick(p), fluid ? 150 : 200);
   }
 
@@ -40,47 +44,54 @@ export function CardChooser({
   const showChem = !!chemForCandidate;
 
   return (
-    <div className="w-full overflow-hidden px-[clamp(4px,2cqw,16px)]">
+    <div
+      className="w-full overflow-hidden px-[clamp(4px,2cqw,16px)]"
+      onMouseLeave={() => onHoverCandidate?.(null)}
+    >
       <div
         className="flex flex-nowrap items-end justify-center w-full draft-card-row"
-        style={{ gap: fluid ? 'clamp(4px, 1.5cqw, 14px)' : undefined }}
+        style={{ gap: fluid ? 'clamp(6px, 1.8cqw, 16px)' : undefined }}
       >
         {cards.map((card, idx) => {
           const isPicked = picked === idx;
           const isOther = picked !== null && picked !== idx;
           const delta = chemForCandidate ? chemForCandidate(card) - baseChem : null;
+          const fit = slotGroup
+            ? positionCategory(card.position, slotGroup, card.altPositions)
+            : undefined;
           return (
             <div
               key={card.id}
+              onMouseEnter={() => onHoverCandidate?.(card)}
+              onFocus={() => onHoverCandidate?.(card)}
               className={clsx(
-                'flex flex-col items-center gap-0.5 transition-transform duration-75 draft-card-slot',
+                'flex flex-col items-center gap-1 transition-transform duration-100 draft-card-slot',
                 isOther && 'opacity-30 scale-90',
                 isPicked && 'animate-card-flip'
               )}
             >
-              <div className="relative animate-pack-flip" style={{ animationDelay: `${idx * 90}ms` }}>
+              <div className="relative animate-pack-flip" style={{ animationDelay: `${idx * 75}ms` }}>
                 <PlayerCard
                   player={card}
                   isSelected={isPicked}
                   onClick={() => handle(card, idx)}
                   size={cardSize}
-                  posFit={slotGroup ? positionCategory(card.position, slotGroup) : undefined}
+                  posFit={fit}
                 />
                 <div
                   className="card-sheen"
-                  style={{ ['--sheen-delay' as string]: `${idx * 90 + 380}ms` } as CSSProperties}
+                  style={{ ['--sheen-delay' as string]: `${idx * 75 + 320}ms` } as CSSProperties}
                 />
               </div>
-              <div className="h-[clamp(12px,2.5cqh,18px)]">
+              <div className="h-[clamp(14px,2.5cqh,20px)] flex items-center justify-center">
                 {delta !== null && (showChem || delta !== 0) && (
                   <span
                     className={clsx(
-                      'font-display font-bold draft-chem-delta',
-                      delta > 0 ? 'text-ucl-green' : delta < 0 ? 'text-ucl-red' : 'text-white/40'
+                      'font-display font-bold draft-chem-delta px-1.5 py-[1px] rounded-[2px] border border-white/10 bg-black/50',
+                      delta > 0 ? 'text-ucl-green' : delta < 0 ? 'text-ucl-red' : 'text-white/55'
                     )}
                   >
-                    {delta > 0 ? '+' : ''}
-                    {delta} chem
+                    {delta > 0 ? `+${delta}` : delta} CHEM
                   </span>
                 )}
               </div>

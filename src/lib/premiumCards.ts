@@ -11,9 +11,11 @@ export function countPremiumPlayers(players: (Player | null)[]): number {
 }
 
 /**
- * FIFA draft never hard-caps icons/heroes — any pick can still roll them.
- * Odds just taper as your squad already has specials (≈half per card drafted).
+ * FIFA 16 Draft never hard-caps Icons/Specials — any pick can still roll them.
+ * Odds taper gently as your squad accumulates specials so a typical 23-man
+ * draft finishes with ~4–7 Special cards and ~16–19 Base Gold cards.
  */
 export function premiumHandChance(baseChance: number, alreadyDrafted: number): number {
-  return baseChance * Math.pow(0.5, alreadyDrafted);
+  const tapered = baseChance * Math.pow(0.76, alreadyDrafted);
+  return Math.max(baseChance * 0.18, tapered);
 }

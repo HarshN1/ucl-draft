@@ -12,67 +12,62 @@ import type {
 
 /**
  * Build a clean, FUT-style chemistry link graph for a formation.
- *
- * Rather than a blunt distance radius (which over-connects central players and
- * makes the pitch look messy), we model how FUT actually links a formation:
- *
- *  1. Group positions into horizontal "lines" by their y coordinate.
- *  2. Link neighbours *within* each line (left-to-right).
- *  3. Link *between* adjacent lines using column alignment — each player bonds
- *     with the closest player (by x) in the line ahead and the line behind.
- *
- * This keeps every player connected into one web with a tidy 2–4 links each,
- * no lone strikers or full-backs, and no spider-web of crossing diagonals.
  */
 function buildAdjacency(formation: Formation): number[][] {
   const positions = formation.positions;
   const n = positions.length;
   const adj: number[][] = Array.from({ length: n }, () => []);
   const link = (a: number, b: number) => {
-    if (a !== b && !adj[a].includes(b)) {
-      adj[a].push(b);
-      adj[b].push(a);
+    const la = adj[a];
+    const lb = adj[b];
+    if (a !== b && la && lb && !la.includes(b)) {
+      la.push(b);
+      lb.push(a);
     }
   };
 
   // 1. Cluster indices into lines by y (positions within 9 units share a line).
   const order = Array.from({ length: n }, (_, i) => i).sort(
-    (a, b) => positions[a].y - positions[b].y
+    (a, b) => positions[a]!.y - positions[b]!.y
   );
   const lines: number[][] = [];
   for (const i of order) {
     const last = lines[lines.length - 1];
-    if (last && Math.abs(positions[i].y - positions[last[0]].y) <= 9) {
+    const pos = positions[i];
+    if (last && pos && Math.abs(pos.y - positions[last[0]!]!.y) <= 9) {
       last.push(i);
     } else {
       lines.push([i]);
     }
   }
   // Sort each line left → right.
-  for (const line of lines) line.sort((a, b) => positions[a].x - positions[b].x);
+  for (const line of lines) line.sort((a, b) => positions[a]!.x - positions[b]!.x);
 
   // 2. Horizontal links within each line.
   for (const line of lines) {
-    for (let k = 0; k < line.length - 1; k++) link(line[k], line[k + 1]);
+    for (let k = 0; k < line.length - 1; k++) {
+      const left = line[k];
+      const right = line[k + 1];
+      if (left === undefined || right === undefined) continue;
+      link(left, right);
+    }
   }
 
   const euclid = (i: number, j: number) => {
-    const dx = positions[i].x - positions[j].x;
-    const dy = positions[i].y - positions[j].y;
+    const dx = positions[i]!.x - positions[j]!.x;
+    const dy = positions[i]!.y - positions[j]!.y;
     return Math.sqrt(dx * dx + dy * dy);
   };
 
-  // 3. Vertical links between adjacent lines — only where columns actually
-  //    align (|Δx| ≤ TOL). This prevents a lone pivot from hoovering up a link
-  //    to every player in the lines around it (the messy spider-web case).
+  // 3. Vertical links between adjacent lines — only where columns actually align.
   const TOL = 18;
   for (let L = 0; L < lines.length - 1; L++) {
     const A = lines[L];
     const B = lines[L + 1];
-    const isGkLine = A.length === 1 && positions[A[0]].positionGroup === 'GK';
+    if (!A || !B) continue;
+    const isGkLine = A.length === 1 && positions[A[0]!]!.positionGroup === 'GK';
     if (isGkLine) {
-      // GK bonds only with the closest one or two defenders.
-      const gk = A[0];
+      const gk = A[0]!;
       [...B]
         .sort((a, b) => euclid(gk, a) - euclid(gk, b))
         .slice(0, Math.min(2, B.length))
@@ -82,16 +77,15 @@ function buildAdjacency(formation: Formation): number[][] {
     let made = 0;
     for (const a of A) {
       for (const b of B) {
-        if (Math.abs(positions[a].x - positions[b].x) <= TOL) {
+        if (Math.abs(positions[a]!.x - positions[b]!.x) <= TOL) {
           link(a, b);
           made++;
         }
       }
     }
-    // Guarantee the two lines are connected even if nothing aligned.
     if (made === 0) {
-      let pa = A[0];
-      let pb = B[0];
+      let pa = A[0]!;
+      let pb = B[0]!;
       let bd = Infinity;
       for (const a of A)
         for (const b of B) {
@@ -106,19 +100,18 @@ function buildAdjacency(formation: Formation): number[][] {
     }
   }
 
-  // 4. Top up any sparse node (0–1 links, e.g. a wide full-back) with its
-  //    nearest outfield neighbour — this is how a LB picks up the LM ahead of
-  //    it without everyone funnelling through the central pivot.
+  // 4. Top up any sparse node (0–1 links) with its nearest outfield neighbour.
   for (let i = 0; i < n; i++) {
-    if (positions[i].positionGroup === 'GK') continue;
-    if (adj[i].length >= 2) continue;
+    const row = adj[i];
+    if (!row || positions[i]!.positionGroup === 'GK') continue;
+    if (row.length >= 2) continue;
     const candidates = Array.from({ length: n }, (_, j) => j)
       .filter(
-        (j) => j !== i && j !== undefined && positions[j].positionGroup !== 'GK' && !adj[i].includes(j)
+        (j) => j !== i && positions[j]!.positionGroup !== 'GK' && !row.includes(j)
       )
       .sort((a, b) => euclid(i, a) - euclid(i, b));
     for (const j of candidates) {
-      if (adj[i].length >= 2) break;
+      if (row.length >= 2) break;
       link(i, j);
     }
   }
@@ -142,8 +135,11 @@ function adjacencyFromLinks(formation: Formation): number[][] {
     for (const t of targets) {
       const j = idx[t];
       if (j == null || j === i) continue;
-      if (!adj[i].includes(j)) adj[i].push(j);
-      if (!adj[j].includes(i)) adj[j].push(i); // links are undirected
+      const ai: number[] | undefined = adj[i];
+      const aj: number[] | undefined = adj[j];
+      if (!ai || !aj) continue;
+      if (!ai.includes(j)) ai.push(j);
+      if (!aj.includes(i)) aj.push(i);
     }
   }
   return adj;
@@ -152,7 +148,6 @@ function adjacencyFromLinks(formation: Formation): number[][] {
 const adjacencyCache: Record<string, number[][]> = {};
 
 export function getAdjacency(formation: Formation): number[][] {
-  // Cache by name + label (formations can share a name across variants).
   const key = `${formation.name}|${formation.label}`;
   if (!adjacencyCache[key]) {
     adjacencyCache[key] =
@@ -160,13 +155,13 @@ export function getAdjacency(formation: Formation): number[][] {
         ? adjacencyFromLinks(formation)
         : buildAdjacency(formation);
   }
-  return adjacencyCache[key];
+  return adjacencyCache[key]!;
 }
 
 // ─── Position grouping (for in-position chemistry) ─────────────────────────────
 
 /** Map a raw player position to a formation position group. */
-function playerPositionGroup(position: string): string {
+export function playerPositionGroup(position: string): string {
   const p = position.toUpperCase();
   if (p === 'GK') return 'GK';
   if (p === 'CB') return 'CB';
@@ -191,21 +186,42 @@ const RELATED_GROUPS: Record<string, string[]> = {
   ST: ['ST', 'CAM', 'WG'],
 };
 
-/** Is a player playing in (or adjacent to) their natural position? */
-export function isInPosition(playerPosition: string, slotGroup: string): boolean {
+/** Is a player playing in (or adjacent to) their natural or secondary position? */
+export function isInPosition(
+  playerPosition: string,
+  slotGroup: string,
+  altPositions?: string[]
+): boolean {
   const pg = playerPositionGroup(playerPosition);
   if (pg === slotGroup) return true;
-  return (RELATED_GROUPS[slotGroup] ?? []).includes(pg);
+  if ((RELATED_GROUPS[slotGroup] ?? []).includes(pg)) return true;
+  if (altPositions && altPositions.length > 0) {
+    for (const alt of altPositions) {
+      const altGroup = playerPositionGroup(alt);
+      if (altGroup === slotGroup || (RELATED_GROUPS[slotGroup] ?? []).includes(altGroup)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
-/** Strict natural-position match (exact group) — used for the out-of-position flag. */
-export function isExactPosition(playerPosition: string, slotGroup: string): boolean {
-  return playerPositionGroup(playerPosition) === slotGroup;
+/** Strict natural-position match (exact group, or exact secondary position group). */
+export function isExactPosition(
+  playerPosition: string,
+  slotGroup: string,
+  altPositions?: string[]
+): boolean {
+  if (playerPositionGroup(playerPosition) === slotGroup) return true;
+  if (altPositions && altPositions.some((alt) => playerPositionGroup(alt) === slotGroup)) {
+    return true;
+  }
+  return false;
 }
 
 // ─── FUT 16 position-fit categories (Green / Yellow / Orange / Red) ─────────────
 
-type PositionCategory = 'perfect' | 'related' | 'outOfRole' | 'wrong';
+export type PositionCategory = 'perfect' | 'related' | 'outOfRole' | 'wrong';
 
 // Player groups that count as a "related" (yellow) fit for each slot group.
 const RELATED_BY_SLOT: Record<string, string[]> = {
@@ -230,8 +246,14 @@ const OUTOFROLE_BY_SLOT: Record<string, string[]> = {
   ST: ['CM'],
 };
 
-/** Classify how well a player's natural position fits a slot. */
-export function positionCategory(playerPosition: string, slotGroup: string): PositionCategory {
+const CATEGORY_RANK: Record<PositionCategory, number> = {
+  perfect: 3,
+  related: 2,
+  outOfRole: 1,
+  wrong: 0,
+};
+
+function singlePositionCategory(playerPosition: string, slotGroup: string): PositionCategory {
   const pg = playerPositionGroup(playerPosition);
   if (pg === slotGroup) return 'perfect';
   if ((RELATED_BY_SLOT[slotGroup] ?? []).includes(pg)) return 'related';
@@ -240,10 +262,40 @@ export function positionCategory(playerPosition: string, slotGroup: string): Pos
 }
 
 /**
+ * Classify how well a player's natural (and optional secondary) positions fit a slot.
+ * Primary position match = 'perfect' (Green dot).
+ * Exact secondary position match upgrades fit to at least 'related' (Yellow dot).
+ */
+export function positionCategory(
+  playerPosition: string,
+  slotGroup: string,
+  altPositions?: string[]
+): PositionCategory {
+  let best = singlePositionCategory(playerPosition, slotGroup);
+  if (best === 'perfect' || !altPositions || altPositions.length === 0) {
+    return best;
+  }
+  for (const alt of altPositions) {
+    const altCat = singlePositionCategory(alt, slotGroup);
+    // An exact secondary position gives at least 'related' (Yellow) fit in FUT 16
+    const effectiveAlt: PositionCategory = altCat === 'perfect' ? 'related' : altCat;
+    if (CATEGORY_RANK[effectiveAlt] > CATEGORY_RANK[best]) {
+      best = effectiveAlt;
+    }
+  }
+  return best;
+}
+
+/** Convenience helper for UI components to inspect a Player's position fit in a slot. */
+export function playerPositionFit(
+  player: Pick<Player, 'position' | 'altPositions'>,
+  slotGroup: string
+): PositionCategory {
+  return positionCategory(player.position, slotGroup, player.altPositions);
+}
+
+/**
  * FUT 16 base individual chemistry from position fit × Net Link Balance.
- * Net Balance is the summed link intensity to active neighbours (green/hyper
- * links cancel dead links). A perfect position with a non-negative balance
- * peaks at 9 base — the remaining point comes from the Draft loyalty shield.
  */
 function baseChemFromBalance(category: PositionCategory, net: number): number {
   if (category === 'wrong') return 0;
@@ -257,21 +309,97 @@ function baseChemFromBalance(category: PositionCategory, net: number): number {
   return t[idx];
 }
 
+// ─── League & Nation Normalization ─────────────────────────────────────────────
+
+/**
+ * Normalize a league name across SoFIFA CSV, Futbin Special Cards, and Manager
+ * definitions so cross-source players in the same league always link.
+ */
+export function normalizeLeague(name: string): string {
+  const s = (name || '').toLowerCase().trim();
+  if (!s) return '';
+  if (s === 'icons' || s === 'fut_legends') return 'icons';
+  if (s.includes('ukrain')) return 'ukraine';
+  if (s.includes('premier') || s.includes('england') || s.includes('barclays')) return 'premier';
+  if (
+    (s.includes('laliga') || s.includes('la liga') || s.includes('spain primera')) &&
+    !s.includes('2') &&
+    !s.includes('hypermotion')
+  ) {
+    return 'laliga';
+  }
+  if (s.includes('ecuador') || s.includes('ligapro')) return 'ecuador';
+  if (s.includes('série a') || s.includes('brazil')) return 'brazil';
+  if (s.includes('serie a') || s.includes('seriea') || s.includes('calcio a')) return 'seriea';
+  if (s.includes('ö. bundesliga') || s.includes('austria')) return 'austria';
+  if (s.includes('bundesliga') && !s.includes('2')) return 'bundesliga';
+  if (s.includes('ligue 1') || s.includes('ligue1')) return 'ligue1';
+  if (s.includes('eredivisie')) return 'eredivisie';
+  if (s.includes('primeira liga') || s.includes('liga portugal') || s.includes('portugal')) {
+    return 'portugal';
+  }
+  if (s.includes('saudi') || s.includes('roshn')) return 'saudi';
+  if (s.includes('major league soccer') || s === 'mls') return 'mls';
+  if (s.includes('süper lig') || s.includes('super lig') || s.includes('trendyol')) {
+    return 'superlig';
+  }
+  if (s.includes('1a pro league') || s.includes('jupiler')) return 'proleague_be';
+  if (s.includes('scottish') || s === 'premiership') return 'scotland';
+  if (s.includes('liga profesional') || s === 'lpf') return 'argentina';
+  if (s.includes('championship')) return 'championship';
+  return s;
+}
+
+function normalizeNation(name: string): string {
+  return (name || '').toLowerCase().trim();
+}
+
+const PSEUDO_CLUBS = new Set(['hero', 'icons', 'ea fc icons', 'special', 'free agent', '']);
+
+function isRealClub(clubName: string | undefined): boolean {
+  if (!clubName) return false;
+  return !PSEUDO_CLUBS.has(clubName.toLowerCase().trim());
+}
+
+export function isLegendOrIcon(p: Player): boolean {
+  return !!(
+    p.isLegend ||
+    p.cardType === 'icon' ||
+    p.cardType === 'thunderstruck_icon' ||
+    normalizeLeague(p.leagueName) === 'icons'
+  );
+}
+
+export function isHeroCard(p: Player): boolean {
+  return p.cardType === 'hero';
+}
+
 // ─── Link quality between two players ──────────────────────────────────────────
 
 function shared(a: Player, b: Player) {
+  const clubMatch =
+    isRealClub(a.clubName) &&
+    isRealClub(b.clubName) &&
+    a.clubName.toLowerCase().trim() === b.clubName.toLowerCase().trim();
+  const la = normalizeLeague(a.leagueName);
+  const lb = normalizeLeague(b.leagueName);
+  const leagueMatch = !!la && !!lb && la !== 'icons' && la === lb;
+  const na = normalizeNation(a.nationalityName);
+  const nb = normalizeNation(b.nationalityName);
+  const nationMatch = !!na && !!nb && na === nb;
+
   return {
-    club: !!a.clubName && a.clubName === b.clubName,
-    league: !!a.leagueName && a.leagueName === b.leagueName,
-    nation: !!a.nationalityName && a.nationalityName === b.nationalityName,
+    club: clubMatch,
+    league: leagueMatch,
+    nation: nationMatch,
   };
 }
 
 /**
  * FUT-style link quality:
- *  - green  : same club, OR (same nation AND same league)
- *  - yellow : same league only, OR same nation only
- *  - red    : nothing shared
+ *  - green  : Strong (+1) or Hyper (+2) link
+ *  - yellow : Weak (0) link
+ *  - red    : Dead (-1) link
  */
 export function linkQuality(a: Player, b: Player): LinkQuality {
   const i = linkIntensity(a, b);
@@ -280,24 +408,36 @@ export function linkQuality(a: Player, b: Player): LinkQuality {
 
 /**
  * FUT 16 "Net Link Balance" intensity for a single active link:
- *   +2 Hyper  — same club AND same nationality
- *   +1 Strong — same club, OR (same league AND same nationality)
- *    0 Weak   — same league only, OR same nationality only
+ *   +2 Hyper  — same club AND same nationality (or Hero + same league & nation)
+ *   +1 Strong — same club, OR (same league AND same nationality), OR Legend/Icon
+ *               same-nation / Legend-to-Legend, OR Hero same-league
+ *    0 Weak   — same league only, OR same nationality only, OR Legend to any
  *   -1 Dead   — nothing shared
- * Strong/Hyper links cancel out Dead links when summed across a slot.
- *
- * Legends are universal bridges: legend↔legend and legend↔same-nation are
- * Strong (+1), legend↔different-nation is Weak (0), and a legend NEVER emits a
- * dead (-1) link — it neutralises dead zones on the pitch.
  */
 export function linkIntensity(a: Player, b: Player): number {
-  if (a.isLegend || b.isLegend) {
-    if (a.isLegend && b.isLegend) return 1;
-    const legend = a.isLegend ? a : b;
-    const other = a.isLegend ? b : a;
-    return legend.nationalityName && legend.nationalityName === other.nationalityName ? 1 : 0;
+  const aLegend = isLegendOrIcon(a);
+  const bLegend = isLegendOrIcon(b);
+  if (aLegend || bLegend) {
+    if (aLegend && bLegend) return 1;
+    const legend = aLegend ? a : b;
+    const other = aLegend ? b : a;
+    return normalizeNation(legend.nationalityName) &&
+      normalizeNation(legend.nationalityName) === normalizeNation(other.nationalityName)
+      ? 1
+      : 0;
   }
+
   const s = shared(a, b);
+
+  // FUT Heroes: automatic Strong (+1) link to anyone in the same league
+  // (and Hyper +2 if same league AND same nationality).
+  if (isHeroCard(a) || isHeroCard(b)) {
+    if (s.league && s.nation) return 2;
+    if (s.league) return 1;
+    if (s.nation) return 0;
+    return -1;
+  }
+
   if (s.club && s.nation) return 2;
   if (s.club || (s.league && s.nation)) return 1;
   if (s.league || s.nation) return 0;
@@ -306,34 +446,14 @@ export function linkIntensity(a: Player, b: Player): number {
 
 // ─── Manager bonus ─────────────────────────────────────────────────────────────
 
-/**
- * Normalize a league name to a canonical token so a hardcoded manager league
- * ("LaLiga") matches whatever the dataset uses ("LaLiga EA SPORTS",
- * "Spain Primera Division", etc.).
- */
-export function normalizeLeague(name: string): string {
-  const s = (name || '').toLowerCase();
-  if (s.includes('premier') || s.includes('england')) return 'premier';
-  if (s.includes('laliga') || s.includes('la liga') || s.includes('primera')) return 'laliga';
-  if (s.includes('serie a') || s.includes('seriea')) return 'seriea';
-  if (s.includes('bundesliga') && !s.includes('2.')) return 'bundesliga';
-  if (s.includes('ligue 1') || s.includes('ligue1')) return 'ligue1';
-  if (s.includes('eredivisie')) return 'eredivisie';
-  if (s.includes('portugal') || s.includes('liga portugal')) return 'portugal';
-  if (s.includes('brazil') || s.includes('série a') || s.includes('serie a tim')) return 'brazil';
-  return s.trim();
-}
-
-function normalizeNation(name: string): string {
-  return (name || '').toLowerCase().trim();
-}
-
 function managerBoost(player: Player, manager: Manager | null | undefined): number {
   if (!manager) return 0;
   if (normalizeNation(manager.nationalityName) === normalizeNation(player.nationalityName)) {
     return 1;
   }
-  if (normalizeLeague(manager.leagueName) === normalizeLeague(player.leagueName)) {
+  const ml = normalizeLeague(manager.leagueName);
+  const pl = normalizeLeague(player.leagueName);
+  if (ml && pl && ml === pl) {
     return 1;
   }
   return 0;
@@ -354,7 +474,6 @@ export function calculateChemistry(
   const adj = getAdjacency(formation);
   const slotCount = formation.positions.length;
 
-  // Map slotIndex → drafted player
   const bySlot: (DraftedPlayer | undefined)[] = new Array(slotCount).fill(undefined);
   for (const dp of starters) {
     if (dp.slotIndex >= 0 && dp.slotIndex < slotCount) {
@@ -371,34 +490,36 @@ export function calculateChemistry(
     if (!player) continue;
 
     const slot = formation.positions[i];
+    if (!slot) continue;
 
-    // Net Link Balance: sum link intensities to active neighbours (green/hyper
-    // links cancel dead red links). Links to empty slots count as 0 (neutral),
-    // so early picks aren't penalised before their neighbours are drafted.
     let net = 0;
-    for (const j of adj[i]) {
+    for (const j of adj[i] ?? []) {
       const neighbor = bySlot[j];
       if (!neighbor) continue;
       net += linkIntensity(player.player, neighbor.player);
 
-      // Record each undirected pair once for the pitch lines (colour by quality)
       const key = i < j ? `${i}-${j}` : `${j}-${i}`;
       if (!seenPairs.has(key)) {
         seenPairs.add(key);
-        links.push({ from: Math.min(i, j), to: Math.max(i, j), quality: linkQuality(player.player, neighbor.player) });
+        links.push({
+          from: Math.min(i, j),
+          to: Math.max(i, j),
+          quality: linkQuality(player.player, neighbor.player),
+        });
       }
     }
 
-    // FUT 16 "9 + 1" rule: matrix base (max 9) + native Draft loyalty shield
-    // (+1) + manager league/nation match (+1), capped at 10.
-    const category = positionCategory(player.player.position, slot.positionGroup);
+    const category = positionCategory(
+      player.player.position,
+      slot.positionGroup,
+      player.player.altPositions
+    );
     const base = baseChemFromBalance(category, net);
     const loyalty = 1;
     const mgr = managerBoost(player.player, manager) > 0 ? 1 : 0;
     perPlayer[i] = Math.max(0, Math.min(10, base + loyalty + mgr));
   }
 
-  // Team chemistry = exact sum of all active starters' chemistry, capped at 100.
   const rawTotal = perPlayer.reduce((a, b) => a + b, 0);
   const total = Math.min(100, rawTotal);
 

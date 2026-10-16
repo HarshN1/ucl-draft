@@ -1,4 +1,5 @@
 import type { BracketTeam, BracketMatch, BracketRound, Squad } from '@/types';
+import type { Rng } from '@/engine/rng';
 
 // ─── Real UCL clubs ──────────────────────────────────────────────────────────
 
@@ -19,12 +20,13 @@ const UCL_CLUBS: Omit<BracketTeam, 'seed'>[] = [
   { id: 'juventus', name: 'Juventus', ovr: 81, isUser: false, badgeUrl: badge(45) },
   { id: 'porto', name: 'Porto', ovr: 80, isUser: false, badgeUrl: badge(236) },
   { id: 'benfica', name: 'Benfica', ovr: 80, isUser: false, badgeUrl: badge(234) },
+  { id: 'liverpool', name: 'Liverpool', ovr: 86, isUser: false, badgeUrl: badge(9) },
   { id: 'monaco', name: 'Monaco', ovr: 79, isUser: false, badgeUrl: badge(69) },
 ];
 
 // ─── Bracket generation ───────────────────────────────────────────────────────
 
-export function generateBracket(squad: Squad): BracketRound[] {
+export function generateBracket(squad: Squad, rng: Rng): BracketRound[] {
   // Random open draw: all 16 teams (user + 15 UCL clubs) shuffled into the
   // bracket with no seeding — you can draw anyone, anytime.
   const userTeam: BracketTeam = {
@@ -36,22 +38,16 @@ export function generateBracket(squad: Squad): BracketRound[] {
     badgeUrl: badge(918), // FK Bodø/Glimt crest
   };
 
-  const allTeams: BracketTeam[] = [
+  const allTeams: BracketTeam[] = rng.shuffle([
     userTeam,
     ...UCL_CLUBS.map((club, i) => ({ ...club, seed: i + 1 })),
-  ];
-
-  // Fisher–Yates shuffle
-  for (let i = allTeams.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [allTeams[i], allTeams[j]] = [allTeams[j], allTeams[i]];
-  }
+  ]);
 
   // Pair consecutive teams into the 8 Round-of-16 matches
   const r16Matches: BracketMatch[] = Array.from({ length: 8 }, (_, idx) => ({
     id: `r16-${idx}`,
-    teamA: allTeams[idx * 2],
-    teamB: allTeams[idx * 2 + 1],
+    teamA: allTeams[idx * 2]!,
+    teamB: allTeams[idx * 2 + 1]!,
     winner: null,
     scoreA: null,
     scoreB: null,
@@ -113,12 +109,14 @@ export function findUserMatch(
     (m) => m.teamA?.isUser || m.teamB?.isUser
   );
   if (matchIndex === -1) return null;
-  return { match: round.matches[matchIndex], matchIndex };
+  const match = round.matches[matchIndex];
+  if (!match) return null;
+  return { match, matchIndex };
 }
 
 // ─── AI vs AI simulation ─────────────────────────────────────────────────────
 
-function simulateAiMatch(teamA: BracketTeam, teamB: BracketTeam): {
+function simulateAiMatch(rng: Rng, teamA: BracketTeam, teamB: BracketTeam): {
   winner: BracketTeam;
   scoreA: number;
   scoreB: number;
@@ -136,7 +134,7 @@ function simulateAiMatch(teamA: BracketTeam, teamB: BracketTeam): {
     let p = 1;
     do {
       k++;
-      p *= Math.random();
+      p *= rng.next();
     } while (p > L);
     return k - 1;
   };
@@ -145,7 +143,7 @@ function simulateAiMatch(teamA: BracketTeam, teamB: BracketTeam): {
 
   // On a draw, decide by the logistic probability (extra time / pens).
   if (scoreA === scoreB) {
-    if (Math.random() < probA) scoreA++;
+    if (rng.next() < probA) scoreA++;
     else scoreB++;
   }
   return { winner: scoreA > scoreB ? teamA : teamB, scoreA, scoreB };
@@ -159,7 +157,8 @@ function simulateAiMatch(teamA: BracketTeam, teamB: BracketTeam): {
  */
 export function progressBracket(
   rounds: BracketRound[],
-  completedRoundIndex: number
+  completedRoundIndex: number,
+  rng: Rng
 ): BracketRound[] {
   const updated = rounds.map((r) => ({
     ...r,
@@ -167,12 +166,13 @@ export function progressBracket(
   }));
 
   const completedRound = updated[completedRoundIndex];
+  if (!completedRound) return updated;
 
   // Simulate AI vs AI matches that don't have a winner yet
   for (const match of completedRound.matches) {
     if (!match.winner && match.teamA && match.teamB) {
       if (!match.teamA.isUser && !match.teamB.isUser) {
-        const result = simulateAiMatch(match.teamA, match.teamB);
+        const result = simulateAiMatch(rng, match.teamA, match.teamB);
         match.winner = result.winner;
         match.scoreA = result.scoreA;
         match.scoreB = result.scoreB;
@@ -219,7 +219,7 @@ export function applyUserResult(
     matches: r.matches.map((m) => ({ ...m })),
   }));
 
-  const match = updated[roundIndex].matches[matchIndex];
+  const match = updated[roundIndex]?.matches[matchIndex];
   if (!match) return updated;
 
   const userIsA = match.teamA.isUser;
@@ -238,11 +238,12 @@ export function applyUserResult(
  */
 export function simulateToChampion(
   rounds: BracketRound[],
-  fromRoundIndex: number
+  fromRoundIndex: number,
+  rng: Rng
 ): { bracket: BracketRound[]; champion: BracketTeam | null } {
   let b = rounds;
   for (let r = fromRoundIndex; r <= 3; r++) {
-    b = progressBracket(b, r);
+    b = progressBracket(b, r, rng);
   }
   const champion = b[3]?.matches[0]?.winner ?? null;
   return { bracket: b, champion };
@@ -276,6 +277,6 @@ export function getUserResult(
 export function getRoundResultLabel(roundIndex: number, won: boolean): string {
   const roundNames = ['Round of 16', 'Quarter-Final', 'Semi-Final', 'Final'];
   if (won && roundIndex === 3) return 'Champions';
-  if (won) return `Won ${roundNames[roundIndex]}`;
-  return `Eliminated ${roundNames[roundIndex]}`;
+  if (won) return `Won ${roundNames[roundIndex] ?? 'round'}`;
+  return `Eliminated ${roundNames[roundIndex] ?? 'round'}`;
 }

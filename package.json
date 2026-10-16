@@ -12,6 +12,9 @@
     "apply-names": "node scripts/apply-display-names.js",
     "generate:sounds": "node scripts/generate-sounds.js",
     "prebuild": "node scripts/generate-sounds.js",
+    "typecheck": "tsc --noEmit",
+    "verify": "pnpm typecheck && vitest run && next build",
+    "test:e2e": "playwright test",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage"
@@ -23,9 +26,11 @@
     "next": "14.2.35",
     "react": "^18",
     "react-dom": "^18",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",

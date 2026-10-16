@@ -2,15 +2,9 @@
 /**
  * process-players.js
  * Reads the rovnez "FC 26 (FIFA 26) Player Data" Kaggle CSV (sofifa scrape) from
- * /data and writes /public/data/players.json.
+ * /data and writes /public/data/players.json (Men's dataset, OVR >= 70).
  *
  * Usage:  node scripts/process-players.js   (or: npm run generate)
- *
- * Auto-detects the CSV file in /data (first *.csv). Bakes final, verified sofifa
- * CDN URLs into each record:
- *   - imageUrl : player_face_url from the dataset (IDs are split into the path)
- *   - badgeUrl : https://cdn.sofifa.net/teams/{club_team_id}/60.png
- *   - flagUrl  : https://cdn.sofifa.net/flags/{iso-code}.png  (via nationFlags.json)
  */
 
 const fs = require('fs');
@@ -19,7 +13,38 @@ const path = require('path');
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const OUTPUT_PATH = path.join(__dirname, '..', 'public', 'data', 'players.json');
 const NATION_FLAGS = require(path.join(__dirname, '..', 'src', 'data', 'nationFlags.json'));
+const DISPLAY_NAMES = require(path.join(__dirname, '..', 'src', 'data', 'playerDisplayNames.json'));
 const MIN_OVR = 70;
+
+/**
+ * Disambiguate leagues that share generic names ("Pro League", "Premier League",
+ * "Bundesliga", "Serie A", "Super League", "Premiership") across countries in SoFIFA CSV.
+ */
+const LEAGUE_BY_ID = {
+  13: 'Premier League',
+  332: 'Ukrainian Premier League',
+  19: 'Bundesliga',
+  80: 'Ö. Bundesliga',
+  31: 'Serie A',
+  2018: 'LigaPro Ecuador',
+  53: 'La Liga',
+  16: 'Ligue 1',
+  308: 'Primeira Liga',
+  10: 'Eredivisie',
+  350: 'ROSHN Saudi League',
+  4: '1A Pro League',
+  2013: 'UAE Pro League',
+  39: 'Major League Soccer',
+  68: 'Süper Lig',
+  50: 'Scottish Premiership',
+  353: 'Liga Profesional de Fútbol',
+  1: '3F Superliga',
+  63: 'Super League Greece',
+  189: 'Credit Suisse Super League',
+  2012: 'Chinese Super League',
+  2149: 'Hero ISL',
+  14: 'Championship',
+};
 
 // ─── CSV parsing (handles quoted fields + CRLF) ────────────────────────────────
 
@@ -58,7 +83,6 @@ function getInt(val, fallback = 0) {
 function findCsv() {
   const files = fs.readdirSync(DATA_DIR).filter((f) => f.toLowerCase().endsWith('.csv'));
   if (files.length === 0) return null;
-  // Prefer a file that looks like the FC26 export
   const preferred = files.find((f) => /fc.?26/i.test(f)) || files[0];
   return path.join(DATA_DIR, preferred);
 }
@@ -68,13 +92,20 @@ function flagUrl(nationName) {
   return code ? `https://cdn.sofifa.net/flags/${code}.png` : '';
 }
 
+function resolveDisplayName(id, rawName) {
+  return (
+    DISPLAY_NAMES.byId[String(id)] ||
+    DISPLAY_NAMES.byExact[rawName] ||
+    rawName
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 function main() {
   const inputPath = findCsv();
   if (!inputPath) {
     console.error(`\n❌  No CSV found in ${DATA_DIR}`);
-    console.error('    Download the rovnez FC 26 dataset and place the .csv in /data\n');
     process.exit(1);
   }
 
@@ -86,12 +117,10 @@ function main() {
   const idx = {};
   header.forEach((h, i) => (idx[h] = i));
 
-  // Required columns (rovnez sofifa schema)
   const required = ['player_id', 'short_name', 'overall', 'player_positions', 'player_face_url'];
   const missing = required.filter((c) => idx[c] === undefined);
   if (missing.length) {
     console.error(`❌  Missing expected columns: ${missing.join(', ')}`);
-    console.error('    First columns found:', header.slice(0, 15).join(', '));
     process.exit(1);
   }
 
@@ -107,19 +136,32 @@ function main() {
     const r = parseCSVLine(lines[i]);
 
     const id = getInt(r[idx.player_id]);
-    if (!id || seen.has(id)) { skippedBad++; continue; }
+    if (!id || seen.has(id)) {
+      skippedBad++;
+      continue;
+    }
 
     const overall = getInt(r[idx.overall]);
-    if (overall < MIN_OVR) { skippedLow++; continue; }
+    if (overall < MIN_OVR) {
+      skippedLow++;
+      continue;
+    }
 
-    const name = r[idx.short_name] || r[idx.long_name];
-    if (!name) { skippedBad++; continue; }
+    const rawName = r[idx.short_name] || r[idx.long_name];
+    if (!rawName) {
+      skippedBad++;
+      continue;
+    }
+    const name = resolveDisplayName(id, rawName);
 
-    const positions = (r[idx.player_positions] || 'ST').split(',').map((p) => p.trim());
-    const position = (positions[0] || 'ST').toUpperCase();
+    const positions = (r[idx.player_positions] || 'ST')
+      .split(',')
+      .map((p) => p.trim().toUpperCase())
+      .filter(Boolean);
+    const position = positions[0] || 'ST';
+    const altPositions = positions.slice(1);
     const isGK = position === 'GK';
 
-    // Outfield stats live in pace/shooting/...; GKs use goalkeeping_* columns.
     const stat = (col, gkCol) => {
       const v = getInt(r[idx[col]], -1);
       if (v >= 0) return v;
@@ -135,13 +177,16 @@ function main() {
     }
 
     const clubId = getInt(r[idx.club_team_id]);
+    const leagueId = getInt(r[idx.league_id]);
+    const leagueName = LEAGUE_BY_ID[leagueId] || r[idx.league_name] || '';
 
     seen.add(id);
-    players.push({
+    const record = {
       id,
       name,
       overall,
       position,
+      ...(altPositions.length > 0 ? { altPositions } : {}),
       pac: stat('pace', 'goalkeeping_diving'),
       sho: stat('shooting', 'goalkeeping_handling'),
       pas: stat('passing', 'goalkeeping_kicking'),
@@ -150,13 +195,14 @@ function main() {
       phy: stat('physic', 'goalkeeping_positioning'),
       clubId,
       clubName: r[idx.club_name] || 'Free Agent',
-      leagueName: r[idx.league_name] || '',
+      leagueName,
       nationalityId: getInt(r[idx.nationality_id]),
       nationalityName: nationName,
       imageUrl: (r[idx.player_face_url] || '').trim(),
       badgeUrl: clubId ? `https://cdn.sofifa.net/teams/${clubId}/60.png` : '',
       flagUrl: fUrl,
-    });
+    };
+    players.push(record);
   }
 
   players.sort((a, b) => b.overall - a.overall);

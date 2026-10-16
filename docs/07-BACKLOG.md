@@ -27,21 +27,21 @@ the remaining budget someone else's problem instead of lost work. See the bottom
 
 ## Phase 0 — Repo hygiene `[GATE]`
 
-- [ ] **0.1** Commit the existing uncommitted work on `feat/ucl-draft-app` in logical chunks, push, open a PR to `main`, merge. Nothing else starts until git matches production. | `commit: chore: land in-flight draft app work`
-- [ ] **0.2** `tsconfig`: `strict: true`, `noUncheckedIndexedAccess: true`, `noImplicitOverride: true`. Fix all resulting errors. Acceptance: `pnpm typecheck` clean. | `commit: chore(ts): enable strict mode`
-- [ ] **0.3** Add `pnpm verify` = `typecheck && vitest run && next build`. Add GitHub Actions running it on push + PR. Acceptance: green CI badge. | `commit: ci: add verify pipeline`
+- [x] **0.1** Commit the existing uncommitted work on `feat/ucl-draft-app` in logical chunks, push, open a PR to `main`, merge. Nothing else starts until git matches production. | `commit: chore: land in-flight draft app work`
+- [x] **0.2** `tsconfig`: `strict: true`, `noUncheckedIndexedAccess: true`, `noImplicitOverride: true`. Fix all resulting errors. Acceptance: `pnpm typecheck` clean. | `commit: chore(ts): enable strict mode`
+- [x] **0.3** Add `pnpm verify` = `typecheck && vitest run && next build`. Add GitHub Actions running it on push + PR. Acceptance: green CI badge. | `commit: ci: add verify pipeline`
 - [ ] **0.4** Connect the Vercel project to the GitHub repo; disable CLI deploys from local. Confirm Preview + Production env vars incl. Upstash. Acceptance: a push to `main` deploys. | `commit: chore: git-based deploys`
-- [ ] **0.5** Add `docs/PROGRESS.md` (append-only log) and `docs/DECISIONS.md` link in README. | `commit: docs: progress log`
-- [ ] **0.6** ESLint: ban `Math.random` outside `src/engine/rng.ts`; ban hardcoded hex colours outside `globals.css`. Acceptance: lint fails on a deliberate violation. | `commit: chore(lint): ban raw random and hex`
+- [x] **0.5** Add `docs/PROGRESS.md` (append-only log) and `docs/DECISIONS.md` link in README. | `commit: docs: progress log`
+- [x] **0.6** ESLint: ban `Math.random` outside `src/engine/rng.ts`; ban hardcoded hex colours outside `globals.css`. Acceptance: lint fails on a deliberate violation. | `commit: chore(lint): ban raw random and hex`
 
 ## Phase 1 — Determinism + resume
 
-- [ ] **1.1** `src/engine/rng.ts` — `mulberry32`, `hashSeed`, a `Rng` class tracking `cursor`. Unit tests: same seed → same sequence; cursor restore reproduces. | `commit: feat(engine): seeded rng`
-- [ ] **1.2** Thread `{seed, cursor}` through draft state; route every existing random call through it. Acceptance: two runs with the same seed produce identical formations, captain draw and all 22 draws. | `commit: feat(engine): seed all draft randomness`
-- [ ] **1.3** Extract the flow into `src/engine/draftMachine.ts` as a pure reducer. `useDraft.ts` becomes a binding with no logic. Acceptance: a Node test plays a full draft with zero React imports. | `commit: refactor(engine): pure draft state machine`
-- [ ] **1.4** Persistence per 06.A: schema, zod validation, session + localStorage mirror, debounced writes. | `commit: feat: persist run state`
-- [ ] **1.5** Restore UI: inline Resume / Start fresh card on landing; discard on schema or dataVersion mismatch. | `commit: feat: resume an interrupted draft`
-- [ ] **1.6** Playwright: 6 picks → reload → same 6 picks and same pending draw. | `commit: test(e2e): mid-draft resume`
+- [x] **1.1** `src/engine/rng.ts` — `mulberry32`, `hashSeed`, a `Rng` class tracking `cursor`. Unit tests: same seed → same sequence; cursor restore reproduces. | `commit: feat(engine): seeded rng`
+- [x] **1.2** Thread `{seed, cursor}` through draft state; route every existing random call through it. Acceptance: two runs with the same seed produce identical formations, captain draw and all 22 draws. | `commit: feat(engine): seed all draft randomness`
+- [x] **1.3** Extract the flow into `src/engine/draftMachine.ts` as a pure reducer. `useDraft.ts` becomes a binding with no logic. Acceptance: a Node test plays a full draft with zero React imports. | `commit: refactor(engine): pure draft state machine`
+- [x] **1.4** Persistence per 06.A: schema, zod validation, session + localStorage mirror, debounced writes. | `commit: feat: persist run state`
+- [x] **1.5** Restore UI: inline Resume / Start fresh card on landing; discard on schema or dataVersion mismatch. | `commit: feat: resume an interrupted draft`
+- [x] **1.6** Playwright: 6 picks → reload → same 6 picks and same pending draw. | `commit: test(e2e): mid-draft resume`
 
 ## Phase 2 — Chemistry + rating correctness
 

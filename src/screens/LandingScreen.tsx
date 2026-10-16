@@ -10,9 +10,19 @@ interface LandingScreenProps {
   onStart: () => void;
   isLoading?: boolean;
   error?: string | null;
+  hasResume?: boolean;
+  onResume?: () => void;
+  onDiscardResume?: () => void;
 }
 
-export function LandingScreen({ onStart, isLoading, error }: LandingScreenProps) {
+export function LandingScreen({
+  onStart,
+  isLoading,
+  error,
+  hasResume,
+  onResume,
+  onDiscardResume,
+}: LandingScreenProps) {
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const { rulesOpen, closeRules, openRules } = useRulesOnFirstVisit();
 
@@ -57,9 +67,37 @@ export function LandingScreen({ onStart, isLoading, error }: LandingScreenProps)
           </div>
         )}
 
+        {hasResume && (
+          <div className="w-full max-w-xs border border-white/15 bg-white/5 px-4 py-3 text-left">
+            <p className="font-display text-[11px] uppercase tracking-widest text-white/50 mb-2">
+              Draft in progress
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button variant="primary" size="md" onClick={onResume} disabled={isLoading} className="flex-1">
+                Resume
+              </Button>
+              <Button
+                variant="ghost"
+                size="md"
+                onClick={onDiscardResume}
+                disabled={isLoading}
+                className="flex-1"
+              >
+                Start fresh
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
-          <Button variant="primary" size="lg" onClick={onStart} disabled={isLoading} className="flex-1">
-            {isLoading ? 'Loading…' : 'Start Draft'}
+          <Button
+            variant="primary"
+            size="lg"
+            onClick={onStart}
+            disabled={isLoading}
+            className="flex-1"
+          >
+            {isLoading ? 'Loading…' : hasResume ? 'New Draft' : 'Start Draft'}
           </Button>
           <Button variant="ghost" size="lg" onClick={() => setShowLeaderboard(true)} className="flex-1">
             Leaderboard

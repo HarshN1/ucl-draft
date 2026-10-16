@@ -2,6 +2,10 @@
 
 export type CardType =
   | 'totw'
+  | 'toty'
+  | 'tots'
+  | 'motm'
+  | 'futties'
   | 'hero'
   | 'icon'
   | 'cornerstones'
@@ -14,6 +18,8 @@ export interface Player {
   name: string;
   overall: number;
   position: string;
+  /** Secondary/alternate positions from EA FC dataset (e.g. ["LW", "CF"]) */
+  altPositions?: string[];
   pac: number;
   sho: number;
   pas: number;
